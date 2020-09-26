@@ -282,6 +282,9 @@ void setup() {
 	pinMode(RADIO_CSN, OUTPUT);
 	pinMode(SD_CS, OUTPUT);
 
+	//TVC Setup
+	analogWriteResolution(14);
+
 	//Init serial
 	if (debug) {
 		Serial.begin(115200);
