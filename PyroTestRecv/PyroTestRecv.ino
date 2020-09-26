@@ -13,12 +13,17 @@ Sensor List
 IMU: BMI088
 
 
-update notes:
+update todo notes:
 rewrite adc code for full 5 pyro channels
 2nd adc support
 migrate NRF24l01 to RF95
 fix pindefs
 ability to fire pyros remotely
+
+buzzer enum state
+tvc enabled enum state
+fix odd bug with lastRadioRecievedTimer and state changed based on telconn state
+
 
 
 
@@ -127,7 +132,8 @@ typedef enum {
 	FIREPYRO = 6
 } RadioCommands;
 
-unsigned long lastRadioRecieveTime = 0;
+const int radioTimeoutDelay = 5000;
+long lastRadioRecieveTime = (long)-radioTimeoutDelay;
 
 /*
 TELEMETRY STRUCT
@@ -202,7 +208,7 @@ struct TELEMETRY telem;
 
 unsigned long lastTelem = 0;
 unsigned long lastHeartbeat = 0;
-const int heartbeatDelay = 500;
+const int heartbeatDelay = 200;
 
 /*
 ADC CONFIG
@@ -259,8 +265,6 @@ const bool buzzerEnabled = false;
 unsigned long lastSensorUpdate = 0;
 const int sensorUpdateDelay = 200;
 
-const int radioTimeoutDelay = 5000;
-
 
 #define INDICATOR_PIN 13
 #define FETONE_PIN 23
@@ -283,7 +287,7 @@ void setup() {
 	pinMode(SD_CS, OUTPUT);
 
 	//TVC Setup
-	analogWriteResolution(14);
+	//analogWriteResolution(14);
 
 	//Init serial
 	if (debug) {
@@ -327,11 +331,13 @@ void loop() {
 	switch (flightMode) {
 		case CONN_WAIT:
 			if (telemetryConnectionState == TEL_CONNECTED) {
+				Serial.println("TEL_CONN in wait");
 				transitionMode(IDLE);
 			}
 			break;
 		case IDLE:
 			if (telemetryConnectionState == TEL_DISCONNECTED) {
+				Serial.println("TEL_DISCONN in idle");
 				transitionMode(CONN_WAIT);
 			}
 			break;
@@ -400,6 +406,7 @@ void loop() {
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
 		debugPrintln("[RADIO] hb");
 		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
+		radioRecieveMode();
 		lastHeartbeat = currentMillis;
 	}
 
@@ -429,11 +436,11 @@ void loop() {
 			case CONN_WAIT:
 				addToneQueue(2000, 150);
 				addToneQueue(1000, 150);
-				buzzerDelay = 1000;
+				buzzerDelay = 3000;
 				break;
 			case IDLE:
 				addToneQueue(2000, 150);
-				buzzerDelay = 1000;
+				buzzerDelay = 3000;
 				break;
 			case LAUNCH:
 			case DESCEND:
@@ -466,11 +473,11 @@ void loop() {
 	RADIO TIME CHECK
 	*/
 	if (currentMillis - lastRadioRecieveTime > radioTimeoutDelay) {
-		debugPrintln("[RADIO] connected");
-		telemetryConnectionState = TEL_CONNECTED;
-	} else {
-		debugPrintln("[RADIO] disconnected");
+		//debugPrintln("[RADIO] disconnected");
 		telemetryConnectionState = TEL_DISCONNECTED;
+	} else {
+		//debugPrintln("[RADIO] connected");
+		telemetryConnectionState = TEL_CONNECTED;
 	}
 
 	/*
@@ -516,27 +523,29 @@ void loop() {
 	MISC
 	*/
 	loopCounter++;
-
-	debugPrintln("loop");
 }
 
 void transitionMode(FlightMode newMode) {
-	flightMode = newMode; //Actually switch the state
+	if (newMode != flightMode) { //Are we not already in the state?
+		flightMode = newMode; //Actually switch the state
 
-	//Play a sound to indicate state change
-	for (int i=0; i<newMode; i++) {
-		toneFreqQueue[toneStackPos] = 2500;
-		toneDelayQueue[toneStackPos] = 100;
-		toneStackPos++; //always increase stack pointer
-		toneFreqQueue[toneStackPos] = 0;
-		toneDelayQueue[toneStackPos] = 100;
-		toneStackPos++; //always increase stack pointer
-	}
-	debugPrint("[STATE] switch to newState: ");
-	debugPrintln(newMode);
-	switch (newMode) {
-		default:
-		break;
+		//Play a sound to indicate state change
+		if (buzzerEnabled) {
+			for (int i=0; i<newMode+1; i++) {
+				toneFreqQueue[toneStackPos] = 2500;
+				toneDelayQueue[toneStackPos] = 100;
+				toneStackPos++; //always increase stack pointer
+				toneFreqQueue[toneStackPos] = 0;
+				toneDelayQueue[toneStackPos] = 100;
+				toneStackPos++; //always increase stack pointer
+			}
+		}
+		debugPrint("[STATE] switch to newState: ");
+		debugPrintln(newMode);
+		switch (newMode) {
+			default:
+			break;
+		}
 	}
 }
 
@@ -600,7 +609,7 @@ void configureInitialConditions() {
 	pyroState = PY_DISARMED;
 	chuteState = C_DISARMED;
 	dataLoggingState = DL_ENABLED_5HZ;
-	telemetryState = TEL_ENABLED_5HZ;
+	telemetryState = TEL_DISABLED;
 	telemetryConnectionState = TEL_DISCONNECTED;
 
 	int t = 1400;
@@ -634,9 +643,9 @@ bool addToneQueue(int freq, int delay) {
 bool firePyroChannel(byte nChannel, int time) { //We don't really care about continuity when firing channels, may as well turn it on
 	if (pyroState == PY_ARMED) {
 		if (nChannel <= 5 && nChannel >= 1) {
-			if (!pyroStates[nChannel]) {
-				pyroStates[nChannel] = true; //set channel to fire
-				pyroOffTimes[nChannel] = millis()+time;
+			if (!pyroStates[nChannel-1]) { //gotta subtract one because of array indexing being weird
+				pyroStates[nChannel-1] = true; //set channel to fire
+				pyroOffTimes[nChannel-1] = millis()+time;
 				pyrosInUse++;
 
 				debugPrint("[PYRO] ch ");
@@ -731,6 +740,7 @@ void recv() {
 				break;
 		}
 
-		lastRadioRecieveTime = millis();
+		radioRecieveMode();
+		lastRadioRecieveTime = (long)millis();
 	}
 }
