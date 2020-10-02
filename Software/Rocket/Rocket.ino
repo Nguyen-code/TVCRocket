@@ -12,6 +12,8 @@ Sensor List
 
 IMU: BMI088
 
+ms5611 https://github.com/jarzebski/Arduino-MS5611
+
 
 update todo notes:
 rewrite adc code for full 5 pyro channels

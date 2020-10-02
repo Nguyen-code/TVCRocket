@@ -6,6 +6,11 @@
 
 
 /*
+Screen code:
+http://www.nhdforum.newhavendisplay.com/index.php?topic=11609.0
+*/
+
+/*
 RADIO
 */
 RF24 radio(7, 8); // CE, CSN
