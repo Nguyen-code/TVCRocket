@@ -1,0 +1,466 @@
+// rf95_client.pde
+// -*- mode: C++ -*-
+// Example sketch showing how to create a simple messageing client
+// with the RH_RF95 class. RH_RF95 class does not provide for addressing or
+// reliability, so you should only use RH_RF95 if you do not need the higher
+// level messaging abilities.
+// It is designed to work with the other example rf95_server
+// Tested with Anarduino MiniWirelessLoRa, Rocket Scream Mini Ultra Pro with
+// the RFM95W, Adafruit Feather M0 with RFM95
+
+#include <SPI.h>
+#include <RH_RF95.h>
+
+// Singleton instance of the radio driver
+RH_RF95 rf95(31, 32);
+//RH_RF95 rf95(5, 2); // Rocket Scream Mini Ultra Pro with the RFM95W
+//RH_RF95 rf95(8, 3); // Adafruit Feather M0 with RFM95 
+
+// Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
+//#define Serial SerialUSB
+
+void setup() 
+{
+  // Rocket Scream Mini Ultra Pro with the RFM95W only:
+  // Ensure serial flash is not interfering with radio communication on SPI bus
+//  pinMode(4, OUTPUT);
+//  digitalWrite(4, HIGH);
+
+  Serial.begin(9600);
+  while (!Serial) ; // Wait for serial port to be available
+  if (!rf95.init())
+    Serial.println("init failed");
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
+  rf95.setTxPower(23, false);
+  rf95.setFrequency(868);
+  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
+  // transmitter RFO pins and not the PA_BOOST pins
+  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
+  // Failure to do that will result in extremely low transmit powers.
+//  driver.setTxPower(14, true);
+}
+
+void loop()
+{
+  Serial.println("Sending to rf95_server");
+  // Send a message to rf95_server
+  uint8_t data[] = "Hello World!";
+  rf95.send(data, sizeof(data));
+  
+  rf95.waitPacketSent();
+  // Now wait for a reply
+  uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  uint8_t len = sizeof(buf);
+
+  if (rf95.waitAvailableTimeout(3000))
+  { 
+    // Should be a reply message for us now   
+    if (rf95.recv(buf, &len))
+   {
+      Serial.print("got reply: ");
+      Serial.println((char*)buf);
+      Serial.print("RSSI: ");
+      Serial.println(rf95.lastRssi(), DEC);    
+    }
+    else
+    {
+      Serial.println("recv failed");
+    }
+  }
+  else
+  {
+    Serial.println("No reply, is rf95_server running?");
+  }
+  delay(400);
+}
+
+
+
+
+
+// rf95_server.pde
+// -*- mode: C++ -*-
+// Example sketch showing how to create a simple messageing server
+// with the RH_RF95 class. RH_RF95 class does not provide for addressing or
+// reliability, so you should only use RH_RF95  if you do not need the higher
+// level messaging abilities.
+// It is designed to work with the other example rf95_client
+// Tested with Anarduino MiniWirelessLoRa, Rocket Scream Mini Ultra Pro with
+// the RFM95W, Adafruit Feather M0 with RFM95
+
+#include <SPI.h>
+#include <RH_RF95.h>
+
+// Singleton instance of the radio driver
+RH_RF95 rf95(31, 32);
+//RH_RF95 rf95(5, 2); // Rocket Scream Mini Ultra Pro with the RFM95W
+//RH_RF95 rf95(8, 3); // Adafruit Feather M0 with RFM95 
+
+// Need this on Arduino Zero with SerialUSB port (eg RocketScream Mini Ultra Pro)
+//#define Serial SerialUSB
+
+int led = 9;
+
+void setup() 
+{
+  // Rocket Scream Mini Ultra Pro with the RFM95W only:
+  // Ensure serial flash is not interfering with radio communication on SPI bus
+//  pinMode(4, OUTPUT);
+//  digitalWrite(4, HIGH);
+
+  pinMode(led, OUTPUT);     
+  Serial.begin(9600);
+  while (!Serial) ; // Wait for serial port to be available
+  if (!rf95.init())
+    Serial.println("init failed");  
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
+  rf95.setTxPower(23, false);
+  rf95.setFrequency(868);
+  // If you are using Modtronix inAir4 or inAir9,or any other module which uses the
+  // transmitter RFO pins and not the PA_BOOST pins
+  // then you can configure the power transmitter power for -1 to 14 dBm and with useRFO true. 
+  // Failure to do that will result in extremely low transmit powers.
+//  driver.setTxPower(14, true);
+}
+
+void loop()
+{
+  if (rf95.available())
+  {
+    // Should be a message for us now   
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+    if (rf95.recv(buf, &len))
+    {
+      digitalWrite(led, HIGH);
+//      RH_RF95::printBuffer("request: ", buf, len);
+      Serial.print("got request: ");
+      Serial.println((char*)buf);
+//      Serial.print("RSSI: ");
+//      Serial.println(rf95.lastRssi(), DEC);
+      
+      // Send a reply
+      uint8_t data[] = "And hello back to you";
+      rf95.send(data, sizeof(data));
+      rf95.waitPacketSent();
+      Serial.println("Sent a reply");
+       digitalWrite(led, LOW);
+    }
+    else
+    {
+      Serial.println("recv failed");
+    }
+  }
+}
+
+/*
+
+  FontUsage.ino
+  
+  How to overwrite previous text with a new text.
+  How to avoid the buffer clear command.
+
+  Universal 8bit Graphics Library (https://github.com/olikraus/u8g2/)
+
+  Copyright (c) 2016, olikraus@gmail.com
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, 
+  are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this list 
+    of conditions and the following disclaimer.
+    
+  * Redistributions in binary form must reproduce the above copyright notice, this 
+    list of conditions and the following disclaimer in the documentation and/or other 
+    materials provided with the distribution.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND 
+  CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, 
+  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
+  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR 
+  CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT 
+  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; 
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER 
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, 
+  STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+
+
+  Usually, a sequence like this is used:
+  u8g2.clearBuffer();         // clear the internal memory
+  u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+  u8g2.setCursor(0,20)        // set write position
+  u8g2.print("Hello World!");     // write something to the internal memory
+  u8g2.sendBuffer();          // transfer internal memory to the display
+  
+  In order to speed up the display content rendering for any modified text,
+  we could drop the clearBuffer command and just overwrite the previous string:
+  
+  u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+  u8g2.setCursor(0,20)        // set write position
+  u8g2.print("hello there");      // write something to the internal memory
+  u8g2.sendBuffer();          // transfer internal memory to the display
+
+  This will only work if:
+  - Background is drawn
+  - All gylphs have the same height
+  Additionally some extra spaces are required of the new text is shorter than the
+  previous one.
+  
+  To draw the background: use font mode 0
+  To ensure that all glyphs have the same height, use h or m fonts.
+  
+  u8g2.setFontMode(0);        // write solid glyphs
+  u8g2.setFont(u8g2_font_ncenB08_hr); // choose a suitable h font
+  u8g2.setCursor(0,20)        // set write position
+  u8g2.print("hello there  ");      // use extra spaces here
+  u8g2.sendBuffer();          // transfer internal memory to the display
+  
+
+*/
+
+#include <Arduino.h>
+#include <U8g2lib.h>
+
+#ifdef U8X8_HAVE_HW_SPI
+#include <SPI.h>
+#endif
+#ifdef U8X8_HAVE_HW_I2C
+#include <Wire.h>
+#endif
+
+/*
+  U8g2lib Example Overview:
+    Frame Buffer Examples: clearBuffer/sendBuffer. Fast, but may not work with all Arduino boards because of RAM consumption
+    Page Buffer Examples: firstPage/nextPage. Less RAM usage, should work with all Arduino boards.
+    U8x8 Text Only Example: No RAM usage, direct communication with display controller. No graphics, 8x8 Text only.
+    
+*/
+
+U8G2_ST7565_NHD_C12832_F_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 9, /* dc=*/ 5, /* reset=*/ 10);
+
+// End of constructor list
+
+#define INFO_SCREEN_DELAY 3000
+
+/*
+  Linear Congruential Generator (LCG)
+  z = (a*z + c) % m;  
+  m = 256 (8 Bit)
+  
+  for period:
+  a-1: dividable by 2
+  a-1: multiple of 4
+  c: not dividable by 2
+  
+  c = 17
+  a-1 = 64 --> a = 65
+*/
+uint8_t z = 127;  // start value
+uint32_t lcg_rnd(void) {
+  z = (uint8_t)((uint16_t)65*(uint16_t)z + (uint16_t)17);
+  return (uint32_t)z;
+}
+
+void setup(void) {
+  u8g2.begin();
+}
+
+void draw(int is_blank)
+{
+  int i, j;
+  int n;
+  char s[4];
+  
+  for( j = 0; j < 20; j++ )
+  {
+    // random number
+    n = lcg_rnd();
+    
+    // random string
+    for( i = 0; i < 3; i++ )
+    {
+      s[i] = lcg_rnd()>>3;
+      if ( s[i] < 16 )
+  s[i] += 'a';
+      else
+  s[i] += 'A';
+    }
+    s[3] = '\0';
+    
+    // print number
+    u8g2.setCursor(0,15);
+    u8g2.print("Number: ");
+    if ( is_blank )
+      u8g2.print("       ");
+    u8g2.setCursor(70,15);
+    u8g2.print(n);
+    
+    
+    // print string
+    u8g2.setCursor(0,30);
+    u8g2.print("Text: ");
+    u8g2.setCursor(70,30);
+    u8g2.print(s);
+    if ( is_blank )
+      u8g2.print("        ");
+    
+    // make the result visible
+    u8g2.sendBuffer();
+    
+    // delay, so that the user can see the result
+    delay(200);
+  }
+}
+
+void draw_m1_t()
+{
+  u8g2.clearBuffer();
+
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);    
+
+  u8g2.setCursor(0,15);
+  u8g2.print(F("setFontMode(1);"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("setFont(..._tr);"));
+  u8g2.setCursor(0, 55);
+  u8g2.print(F("Very Bad"));
+    
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+  u8g2.setFontMode(1);    
+  u8g2.setFont(u8g2_font_cu12_tr);    
+  u8g2.clearBuffer();         // clear the internal memory once
+  draw(0);
+}
+
+void draw_m0_t()
+{
+  u8g2.clearBuffer();
+  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);    
+  
+  u8g2.setCursor(0,15);
+  u8g2.print(F("setFontMode(0);"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("setFont(.._tr);"));
+  u8g2.setCursor(0, 55);
+  u8g2.print(F("Wrong"));
+  
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+  u8g2.setFontMode(0);
+  u8g2.setFont(u8g2_font_cu12_tr);      
+  u8g2.clearBuffer();         // clear the internal memory once
+  draw(0);
+}
+
+void draw_m1_h()
+{
+  u8g2.clearBuffer();
+  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);    
+  
+  u8g2.setCursor(0,15);
+  u8g2.print(F("setFontMode(0);"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("setFont(.._hr);"));  
+  u8g2.setCursor(0, 55);
+  u8g2.print(F("Still bad"));
+  
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_hr);    
+  u8g2.clearBuffer();         // clear the internal memory once
+  draw(0);
+}
+
+void draw_m0_h()
+{
+  u8g2.clearBuffer();
+  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);    
+  
+  u8g2.setCursor(0,15);
+  u8g2.print(F("setFontMode(0);"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("setFont(.._hr);"));  
+  u8g2.setCursor(0, 55);
+  u8g2.print(F("Almost ok"));
+  
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+  u8g2.setFontMode(0);
+  u8g2.setFont(u8g2_font_cu12_hr);    
+  u8g2.clearBuffer();         // clear the internal memory once
+  draw(0);
+}
+
+void draw_m0_h_with_extra_blank()
+{
+  u8g2.clearBuffer();
+  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);    
+  
+  u8g2.setCursor(0,15);
+  u8g2.print(F("setFontMode(0);"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("setFont(.._hr);"));  
+  u8g2.setCursor(0, 55);
+  u8g2.print(F("Extra blank --> Ok"));
+  
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+  u8g2.setFontMode(0);
+  u8g2.setFont(u8g2_font_cu12_hr);    
+  u8g2.clearBuffer();         // clear the internal memory once
+  draw(1);
+}
+
+
+void loop(void) {
+
+  // This problem applies only to full buffer mode
+  u8g2.clearBuffer();  
+  u8g2.setFontMode(1);
+  u8g2.setFont(u8g2_font_cu12_tr);      
+  u8g2.setCursor(0,15);
+  u8g2.print(F("Problems with"));
+  u8g2.setCursor(0,30);
+  u8g2.print(F("full buffer mode"));
+  u8g2.setCursor(0,45);
+  u8g2.print(F("and skipped clear."));
+  u8g2.sendBuffer();
+  delay(INFO_SCREEN_DELAY);
+  
+
+  draw_m1_t();      // fontmode 1, t font --> wrong
+  draw_m1_h();      // fontmode 1, h font --> wrong
+  draw_m0_t();      // fontmode 0, t font --> wrong
+  draw_m0_h();      // fontmode 1, h font --> ok
+  draw_m0_h_with_extra_blank(); // fontmode 1, h font with extra blank --> correct
+  delay(1000);  
+}
