@@ -1,0 +1,46 @@
+kalman filter notes:
+
+Reference code:
+https://github.com/adafruit/Adafruit_AHRS/blob/master/src/Adafruit_AHRS_NXPFusion.cpp
+
+EKF but python:
+https://github.com/diegoavillegasg/IMU-GNSS-Lidar-sensor-fusion-using-Extended-Kalman-Filter-for-State-Estimation/blob/master/es_ekf.py#L172
+https://github.com/diegoavillegasg/IMU-GNSS-Lidar-sensor-fusion-using-Extended-Kalman-Filter-for-State-Estimation/blob/master/es_ekf.py
+https://github.com/cyscgzx33/Self_Driving_Car_State_Estimation/blob/master/state_estimate_final_proj/es_ekf.py
+
+Kalman python but sim only:
+https://github.com/tottaway/kalman-filters/blob/master/kalman.py
+
+C++ EKF
+https://github.com/rsasaki0109/kalman_filter_localization/blob/master/include/kalman_filter_localization/ekf.hpp
+
+EKF but for drones
+https://github.com/PX4/ecl
+
+State is represented by a matrix x
+Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
+
+Best estimate is x hat sub k - aka mean of readings
+Covariance matrix is P sub k - represents the degree of correlation between the ith and jth state variable
+
+Looking at current state at t=k-1, next state at time K can be mapped by a matrix F sub k, which moves every point to a new estimate
+
+Update covariance matrix by using identity cov(Ax) = AcovAt
+
+U sub k is the control vector - represents what the guidance system is doing to the system
+B sub k is the control matrix - represents mapping of the control vector to the system
+
+Add expanded covariance of Q sub k to the covariance matrix
+
+"the new best estimate is a prediction made from previous best estimate, plus a correction for known external influences.
+
+And the new uncertainty is predicted from the old uncertainty, with some additional uncertainty from the environment."
+
+Sensors tell us something indirect about the state - they produce a set of readings
+Sensors are modelled by a matrix, H sub k, which is used to map the readings to the state or covariance matrix
+
+Covariance of the sensor uncertainty (i.e. noise) is the matrix R sub k, mean equal to the reading we observed which is a vector, z sub k
+
+If we multiply H sub k and Z sub k, we get the intersection between uncertainty and the sensor reading, which gives us a nice best guess
+
+K is kalman gain matrix that
