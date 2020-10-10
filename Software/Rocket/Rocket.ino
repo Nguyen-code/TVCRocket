@@ -27,18 +27,20 @@ tvc enabled enum state
 fix odd bug with lastRadioRecievedTimer and state changed based on telconn state
 
 
+Thrust curve interpolation
+https://github.com/luisllamasbinaburo/Arduino-Interpolation
 
 
 optimizations:
 pyro checking can remove for loop and use bool flag
 telem can use different packet struct?
 
+
+FIX ALL THE PINDEFS
+
 */
 
 #include <SPI.h>
-#include <printf.h>
-#include <nRF24L01.h>
-#include <RF24.h>
 #include <SD.h>
 #include <ADS1X15.h>
 #include "states.h"
@@ -83,9 +85,7 @@ TelemConnStates telemetryConnectionState = TEL_DISCONNECTED;
 /*
 RADIO
 */
-RF24 radio(0,1); // CE, CSN
-const byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
-boolean radioListening = false;
+RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 
 struct RadioPacket {
 	byte id;
@@ -272,9 +272,6 @@ const int sensorUpdateDelay = 200;
 #define FETONE_PIN 23
 #define FETTWO_PIN 22
 #define BUZZER_PIN 20
-#define RADIO_IRQ 2
-#define RADIO_CE 0
-#define RADIO_CSN 1
 #define SD_CS 21
 
 void setup() {
@@ -300,17 +297,13 @@ void setup() {
 	configureInitialConditions(); 
 
 	//Setup radio
-	printf_begin();
-	radio.begin();
-	radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
-	radio.setRetries(3,3); // delay, count
-	radio.openWritingPipe(addresses[1]);
-	radio.openReadingPipe(1, addresses[0]); //set address to recieve data
-	radio.maskIRQ(1,1,0);
-	attachInterrupt(digitalPinToInterrupt(RADIO_IRQ), recv, FALLING);
-	radioTransmitMode();
-	radio.stopListening();
-	radio.printDetails();
+	if (!radio.init()) {
+		errorInitializing();
+	} else {
+		debugPrintln("[INIT] RADIO OK");
+	}
+	radio.setTxPower(23, false);
+  	radio.setFrequency(868);
 
 	//Setup SD card
 	if (!card.init(SPI_HALF_SPEED, SD_CS)) {
@@ -408,7 +401,6 @@ void loop() {
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
 		debugPrintln("[RADIO] hb");
 		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
-		radioRecieveMode();
 		lastHeartbeat = currentMillis;
 	}
 
@@ -469,6 +461,61 @@ void loop() {
 				break;
 		}
 		lastBuzzer = currentMillis;
+	}
+
+	/*
+	RADIO
+	*/
+	if (radio.available()) {
+		RadioPacket rx;
+		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    	uint8_t len = sizeof(buf);
+		radio.recv(buf, &len);
+
+		rx = (RadioPacket)buf;
+
+		switch (rx.id) {
+			case GETSTATE:
+				sendRadioPacket(GETSTATE, 0, flightMode, pyroState, telemetryState);
+				break;
+			case SETSTATE:
+				switch ((int)rx.data1) {
+					case 0:
+						flightMode = CONN_WAIT;
+						break;
+					case 1:
+						flightMode = IDLE;
+						break;
+					case 2:
+						flightMode = LAUNCH;
+						break;
+					case 3:
+						flightMode = DESCEND;
+						break;
+					case 4:
+						flightMode = COPYINGSD;
+						break;
+					case 5:
+						flightMode = LANDED;
+						break;
+				}
+				break;
+			case REQTELEM:
+				sendTelemetry();
+				break;
+			case PYROARMING:
+				if (rx.data1) {
+					pyroState = PY_ARMED;
+				} else {
+					pyroState = PY_DISARMED;
+				}
+				break;
+			case FIREPYRO:
+				firePyroChannel(rx.data1, rx.data2);
+				break;
+		}
+
+		lastRadioRecieveTime = (long)millis();
 	}
 
 	/*
@@ -552,8 +599,6 @@ void transitionMode(FlightMode newMode) {
 }
 
 void sendTelemetry() {
-	radioTransmitMode();
-
 	// sub IDs:
 	// 0 - time since startup, MET, loop freq
 	// 1 - flightmode, pyrostates, chutestates
@@ -594,8 +639,6 @@ void sendTelemetry() {
 	sendRadioPacket(GETTELEM, 15, telem.pyro4Fire, telem.pyro5Fire, 0);
 
 	sendRadioPacket(GETTELEM, 16, telem.tvcX, telem.tvcY, 0);
-
-	radioRecieveMode();
 }
 
 bool adcPyroContinuity(float inpVoltage, int16_t pyroVoltage) {
@@ -669,20 +712,6 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 	return false;
 }
 
-void radioRecieveMode() {
-  if (!radioListening) { //if we're not listening
-    radio.startListening();
-    radioListening = true;
-  }
-}
-
-void radioTransmitMode() {
-  if (radioListening) {
-    radio.stopListening();
-    radioListening = false;
-  }
-}
-
 void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3) {
 	RadioPacket tx;
 	tx.id = id;
@@ -691,58 +720,5 @@ void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3)
 	tx.data2 = data2;
 	tx.data3 = data3;
 
-	radioTransmitMode(); //ok to call this since transmitMode keeps track of radio state and won't run if it's already in transmit mode
 	radio.write(&tx, sizeof(tx));
-}
-
-void recv() {
-	radioRecieveMode();
-	if (radio.available()) {
-		RadioPacket rx;
-		radio.read(&rx, sizeof(rx));
-
-		switch (rx.id) {
-			case GETSTATE:
-				sendRadioPacket(GETSTATE, 0, flightMode, pyroState, telemetryState);
-				break;
-			case SETSTATE:
-				switch ((int)rx.data1) {
-					case 0:
-						flightMode = CONN_WAIT;
-						break;
-					case 1:
-						flightMode = IDLE;
-						break;
-					case 2:
-						flightMode = LAUNCH;
-						break;
-					case 3:
-						flightMode = DESCEND;
-						break;
-					case 4:
-						flightMode = COPYINGSD;
-						break;
-					case 5:
-						flightMode = LANDED;
-						break;
-				}
-				break;
-			case REQTELEM:
-				sendTelemetry();
-				break;
-			case PYROARMING:
-				if (rx.data1) {
-					pyroState = PY_ARMED;
-				} else {
-					pyroState = PY_DISARMED;
-				}
-				break;
-			case FIREPYRO:
-				firePyroChannel(rx.data1, rx.data2);
-				break;
-		}
-
-		radioRecieveMode();
-		lastRadioRecieveTime = (long)millis();
-	}
 }

@@ -1,7 +1,6 @@
 #include <SPI.h>
-#include "printf.h"
-#include <nRF24L01.h>
-#include <RF24.h>
+#include <SPI.h>
+#include <RH_RF95.h>
 #include "states.h"
 
 
@@ -13,9 +12,7 @@ http://www.nhdforum.newhavendisplay.com/index.php?topic=11609.0
 /*
 RADIO
 */
-RF24 radio(7, 8); // CE, CSN
-const byte addresses [][6] = {"00002", "00001"}; //write at addr 00001, read at addr 00002
-boolean radioListening = false;
+RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 
 struct RadioPacket {
 	byte id;
@@ -151,16 +148,11 @@ String serialBuffer = "";
 void setup() {
 	Serial.begin(115200);
 
-	//Setup radio
-	printf_begin();
-	radio.begin();
-	radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
-	radio.setRetries(3,3); // delay, count
-	radio.openWritingPipe(addresses[1]);
-	radio.openReadingPipe(1, addresses[0]); //set address to recieve data
-	radioTransmitMode();
-	radio.stopListening();
-	radio.printDetails();	
+	if (!radio.init()) {
+		errorInitializing();
+	}
+	radio.setTxPower(23, false);
+  	radio.setFrequency(868);
 }
 
 void loop() {
@@ -168,16 +160,16 @@ void loop() {
 
 	if (currentMillis - lastPacketPrint >= packetPrintDelay) {
 		float packetRate = rocketHBPacketCount/(packetPrintDelay/1000);
-		Serial.print("Getting HB packets at rate: ");
+		Serial.print("Rate=");
 		Serial.print(packetRate);
-		Serial.println("Hz");
+		Serial.print("Hz\tRSSI=");
+		Serial.println(radio.lastRSSI(), DEC);
 		rocketHBPacketCount = 0;
 		lastPacketPrint = currentMillis;
 	}
 
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
 		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
-		radioRecieveMode();
 		lastHeartbeat = currentMillis;
 	}
 
@@ -212,7 +204,6 @@ void loop() {
 			} else {
 				Serial.println("Command not understood");
 			}
-			radioRecieveMode();
 			serialBuffer = "";
 		} else {
 			serialBuffer += inChar;
@@ -221,7 +212,11 @@ void loop() {
 
 	if (radio.available()) {
 		RadioPacket rx;
-		radio.read(&rx, sizeof(rx));
+		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    	uint8_t len = sizeof(buf);
+		radio.recv(buf, &len);
+
+		rx = (RadioPacket)buf;
 
 		if (rx.id != 3) {
 			Serial.print("GOT CMD: ");
@@ -279,21 +274,6 @@ void loop() {
 
 }
 
-
-void radioRecieveMode() {
-  if (!radioListening) { //if we're not listening
-    radio.startListening();
-    radioListening = true;
-  }
-}
-
-void radioTransmitMode() {
-  if (radioListening) {
-    radio.stopListening();
-    radioListening = false;
-  }
-}
-
 void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3) {
 	RadioPacket tx;
 	tx.id = id;
@@ -302,6 +282,5 @@ void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3)
 	tx.data2 = data2;
 	tx.data3 = data3;
 
-	radioTransmitMode(); //ok to call this since transmitMode keeps track of radio state and won't run if it's already in transmit mode
-	radio.write(&tx, sizeof(tx));
+	radio.send(tx, sizeof(tx));
 }
