@@ -482,9 +482,9 @@ void loop() {
 		if (oriMode == COMPLEMENTARY) {
 			gyro.readSensor();
 
-			gyroMeasure.roll = gyro.getGyroX_rads() + gbiasX;
+			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
 			gyroMeasure.pitch = -(gyro.getGyroY_rads() + gbiasY);
-			gyroMeasure.yaw = -(gyro.getGyroZ_rads() + gbiasZ);
+			gyroMeasure.yaw = (gyro.getGyroZ_rads() + gbiasZ);
 
 			ori.update(gyroMeasure, dtOri);
 
@@ -494,9 +494,9 @@ void loop() {
 			ori.applyComplementary(accVec,0.02);
 		} else if (oriMode == GYRONLY) {
 			gyro.readSensor();
-			gyroMeasure.roll = gyro.getGyroX_rads() + gbiasX;
-			gyroMeasure.pitch = gyro.getGyroY_rads() + gbiasY;
-			gyroMeasure.yaw = gyro.getGyroZ_rads() + gbiasZ;
+			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
+			gyroMeasure.pitch = -(gyro.getGyroY_rads() + gbiasY);
+			gyroMeasure.yaw = (gyro.getGyroZ_rads() + gbiasZ);
 
 			ori.update(gyroMeasure, dtOri);
 		} else if (oriMode == CALCBIASES) {
@@ -510,9 +510,9 @@ void loop() {
 			biasCount++;
 
 			if (currentMicros - biasStart > 3000000) { //3sec
-				abiasX /= biasCount; //Find bias in 1 msec
+				abiasX /= biasCount; //Find bias in 1 reading
 				abiasY /= biasCount;
-				gbiasX /= biasCount; //Find bias in 1 msec
+				gbiasX /= biasCount; //Find bias in 1 reading
 				gbiasY /= biasCount;
 				gbiasZ /= biasCount;
 
@@ -552,13 +552,13 @@ void loop() {
 		float yAng = yAxis.getLast();
 
 		//Roll correction required
-		float cs = cos(-locX);
-		float sn = sin(-locX);
+		double cs = cos(-locX*0.0174533);
+		double sn = sin(-locX*0.0174533);
 
 		float trueYOut = (yAng*cs) - (zAng*sn);
 		float trueZOut = (yAng*sn) + (zAng*cs);
 
-		writeTVCCH1(trueZOut, trueYOut);
+		writeTVCCH1(trueYOut, -trueZOut);
 		lastTVCMicros = micros();
 	}
 
@@ -1066,7 +1066,7 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 void writeTVCCH1(float x, float y) {
 	x = constrain(x, -20, 20);
 	y = constrain(y, -20, 20);
-	x = -x;
+	//x = -x;
 	//y = -y;
 	//Serial.println(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
