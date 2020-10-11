@@ -376,13 +376,13 @@ void setup() {
 	}
 
 	//Setup BMI088
-	if (!accel.begin()) {
+	if (accel.begin() < 0) {
 		Serial.println("[INIT] BMI088 accel failed to initialize");
 		error = true;
 	} else {
 		debugPrintln("[INIT] ACCEL INIT OK");
 	}
-	if (!gyro.begin()) {
+	if (gyro.begin() < 0) {
 		Serial.println("[INIT] BMI088 gyro failed to initialize");
 		error = true;
 	} else {
@@ -509,7 +509,7 @@ void loop() {
 			abiasY += accel.getAccelY_mss();
 			biasCount++;
 
-			if (currentMicros - biasStart > 5000000) { //5sec
+			if (currentMicros - biasStart > 3000000) { //3sec
 				abiasX /= biasCount; //Find bias in 1 msec
 				abiasY /= biasCount;
 				gbiasX /= biasCount; //Find bias in 1 msec
@@ -981,7 +981,10 @@ void configureInitialConditions() {
 	noTone(BUZZER_PIN);
 
 	writeTVCCH1(0, 0);
-	writeTVCCH1(30, 30); //Up and right
+	delay(1000);
+	writeTVCCH1(10, 10); //Up and right
+	delay(1000);
+	writeTVCCH1(0, 0);
 
 	delay(100);
 	transitionMode(CONN_WAIT);
@@ -1061,8 +1064,10 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 }
 
 void writeTVCCH1(float x, float y) {
-	x = constrain(x, -45, 45);
-	y = constrain(y, -45, 45);
+	x = constrain(x, -20, 20);
+	y = constrain(y, -20, 20);
+	x = -x;
+	//y = -y;
 	//Serial.println(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_Y_CH1.write(90 + (y * SERVO_MULT) + TVC_Y_CH1_OFFSET);

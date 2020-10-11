@@ -18,18 +18,18 @@ TVC OFFSETS
 PID VALUES
 */
 
-const float PID_Z_P = 0.1;
+const float PID_Z_P = 0.75;
 const float PID_Z_I = 0.0;
-const float PID_Z_D = 0.0;
+const float PID_Z_D = 0.05;
 
-const float PID_Y_P = 0.1;
+const float PID_Y_P = 0.75;
 const float PID_Y_I = 0.0;
-const float PID_Y_D = 0.0;
+const float PID_Y_D = 0.05;
 
 /*
 SERVO CONSTANTS
 */
-#define SERVO_MULT 1
+#define SERVO_MULT 3
 
 /*
 ADC RESISTOR DIVIDER CALCUALTIONS
