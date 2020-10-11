@@ -1,5 +1,4 @@
 /*
-This code was designed to run on ZENITH 2.0, because I am waiting for ZENITH 3.0 to arrive in the mail (rip)
 By Aaron Becker
 
 rocket notes:
@@ -16,11 +15,7 @@ ms5611 https://github.com/jarzebski/Arduino-MS5611
 
 
 update todo notes:
-rewrite adc code for full 5 pyro channels
 2nd adc support
-migrate NRF24l01 to RF95
-fix pindefs
-ability to fire pyros remotely
 
 buzzer enum state
 tvc enabled enum state
@@ -32,18 +27,33 @@ https://github.com/luisllamasbinaburo/Arduino-Interpolation
 
 
 optimizations:
-pyro checking can remove for loop and use bool flag
 telem can use different packet struct?
 
 
-FIX ALL THE PINDEFS
+things to test:
+pyro channels (all 5)
+servo movement and centering
+PID values (duh)
+constants for adc
+short v cont detection adc
+flash chip!
+sd!
+
 
 */
 
+
+//External libs
 #include <SPI.h>
 #include <SD.h>
 #include <ADS1X15.h>
+#include <Servo.h>
+#include <RH_RF95.h>
+
+//Internal header fils
 #include "states.h"
+#include "pindefs.h"
+#include "constants.h"
 
 /*
 DEBUG
@@ -195,11 +205,11 @@ struct TELEMETRY {
 	int gpsSats;
 
 	//Pyro channel data
-	bool pyro1Cont;
-	bool pyro2Cont;
-	bool pyro3Cont;
-	bool pyro4Cont;
-	bool pyro5Cont;
+	int pyro1Stat; //Status: 0=disconnected, 1=continuity OK, 2=short
+	int pyro2Stat;
+	int pyro3Stat;
+	int pyro4Stat;
+	int pyro5Stat;
 	bool pyro1Fire;
 	bool pyro2Fire;
 	bool pyro3Fire;
@@ -216,20 +226,8 @@ const int heartbeatDelay = 200;
 ADC CONFIG
 */
 
-ADS1015 ADS1(0x48);
-ADS1015 ADS2(0x49);
-const int ADC_VBUS_DIVD_RES1 = 10000;
-const int ADC_VBUS_DIVC_RES2 = 1800;
-const double ADC_RES_DIV_FACTOR_VBUS = (double)ADC_VBUS_DIVC_RES2/((double)ADC_VBUS_DIVD_RES1+(double)ADC_VBUS_DIVC_RES2);
-
-const int ADC_PYRO_DIVD_RES1 = 1500;
-const int ADC_PYRO_DIVD_RES2 = 1500;
-const double ADC_RES_DIV_FACTOR_PYRO = (double)ADC_PYRO_DIVD_RES2/((double)ADC_PYRO_DIVD_RES1+(double)ADC_PYRO_DIVD_RES2);
-
-const double ADC_MAX_V = 6.144;
-const double ADC_DIV_FACTOR_V = ADC_MAX_V/4096;
-
-const float ADC_PYRO_VDROP_THRESH = 0.22;
+ADS1015 ADS1(ADC1_I2C_ADDR);
+ADS1015 ADS2(ADC2_I2C_ADDR);
 
 
 /*
@@ -254,6 +252,15 @@ bool pyroStates[5];
 int pyrosInUse = 0;
 
 /*
+TVC SERVOS CONFIG
+*/
+Servo TVC_X_CH1;
+Servo TVC_Y_CH1;
+Servo TVC_X_CH2;
+Servo TVC_Y_CH2;
+
+
+/*
 MISC VARS
 */
 int loopCounter = 0;
@@ -267,26 +274,48 @@ const bool buzzerEnabled = false;
 unsigned long lastSensorUpdate = 0;
 const int sensorUpdateDelay = 200;
 
-
-#define INDICATOR_PIN 13
-#define FETONE_PIN 23
-#define FETTWO_PIN 22
-#define BUZZER_PIN 20
-#define SD_CS 21
-
 void setup() {
 	//Setup pin states
-	pinMode(INDICATOR_PIN, OUTPUT);
-	pinMode(FETONE_PIN, OUTPUT);
-	pinMode(FETTWO_PIN, OUTPUT);
+	pinMode(IND_R_PIN, OUTPUT);
+	pinMode(IND_G_PIN, OUTPUT);
+	pinMode(IND_B_PIN, OUTPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
-	pinMode(RADIO_IRQ, INPUT);
-	pinMode(RADIO_CE, OUTPUT);
-	pinMode(RADIO_CSN, OUTPUT);
+
+	pinMode(PYRO1_PIN, OUTPUT);
+	pinMode(PYRO2_PIN, OUTPUT);
+	pinMode(PYRO3_PIN, OUTPUT);
+	pinMode(PYRO4_PIN, OUTPUT);
+	pinMode(PYRO5_PIN, OUTPUT);
+
+	pinMode(TVC_CH1_X, OUTPUT);
+	pinMode(TVC_CH1_Y, OUTPUT);
+	pinMode(TVC_CH2_X, OUTPUT);
+	pinMode(TVC_CH2_Y, OUTPUT);
+
+	pinMode(ROLL_FIN, OUTPUT);
+	pinMode(ROLL_RIN, OUTPUT);
+
 	pinMode(SD_CS, OUTPUT);
+	pinMode(SD_INS, INPUT);
+
+	pinMode(RADIO_RESET, OUTPUT);
+	pinMode(RADIO_IRQ, INPUT);
+	pinMode(RADIO_CS, OUTPUT);
+
+	pinMode(FLASH_CS, OUTPUT);
 
 	//TVC Setup
-	//analogWriteResolution(14);
+	analogWriteResolution(14);
+
+	TVC_CH1_X.attach(TVC_CH1_X_PIN); //Attach all servos to their respective pins
+	TVC_CH1_Y.attach(TVC_CH1_Y_PIN);
+	TVC_CH2_X.attach(TVC_CH2_X_PIN);
+	TVC_CH2_Y.attach(TVC_CH2_Y_PIN);
+
+	TVC_CH1_X.write(90+TVC_CH1_X_OFFSET); //Write all servos to center
+	TVC_CH1_Y.write(90+TVC_CH1_Y_OFFSET);
+	TVC_CH2_X.write(90+TVC_CH2_X_OFFSET);
+	TVC_CH2_Y.write(90+TVC_CH2_Y_OFFSET);
 
 	//Init serial
 	if (debug) {
@@ -312,10 +341,15 @@ void setup() {
 		debugPrintln("[INIT] SD OK");
 	}
 
-	//Setup ADS1015
+	//Setup ADS1015 #1
 	ADS1.begin();
   	ADS1.setGain(0);
-  	debugPrintln("[INIT] ADS OK");
+  	debugPrintln("[INIT] ADS1 OK");
+
+  	//Setup ADS1015 #2
+	ADS2.begin();
+  	ADS2.setGain(0);
+  	debugPrintln("[INIT] ADS2 OK");
 }
 
 void loop() {
@@ -360,20 +394,29 @@ void loop() {
 		telem.pyro4Fire = pyroStates[3];
 		telem.pyro5Fire = pyroStates[4];
 
-		//Now sample ADC
-		int16_t ads0 = ADS1.readADC(0);  
-		int16_t ads1 = ADS1.readADC(1);  
-		int16_t ads2 = ADS1.readADC(2);  
-		int16_t ads3 = ADS1.readADC(3);
+		//Now sample ADCs
+		int16_t ads1_0 = ADS1.readADC(0);  
+		int16_t ads1_1 = ADS1.readADC(1);  
+		int16_t ads1_2 = ADS1.readADC(2);  
+		int16_t ads1_3 = ADS1.readADC(3);
+		int16_t ads2_0 = ADS1.readADC(0);  
+		int16_t ads2_1 = ADS1.readADC(1);  
+		int16_t ads2_2 = ADS1.readADC(2);  
+		int16_t ads2_3 = ADS1.readADC(3);
+
 		float f = ADS1.toVoltage(1);
 
-		//Calculate ADC voltages
-		telem.battV = (float)ads0*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VBUS; //use conv factor
-  		telem.servoV = (float)ads3*ADC_DIV_FACTOR_V;
+		//Calculate line voltages using conversion factors
+		telem.battV = (float)ads1_0*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VBUS; //use conv factor
+  		telem.servoV = (float)ads1_1*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VSERVO;
+  		telem.rollMotorV = (float)ads1_2*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VMOTOR;
 
   		//Calculate resistance on pyro channels
-  		telem.pyro1Cont = adcPyroContinuity(telem.battV, ads1);
-  		telem.pyro2Cont = adcPyroContinuity(telem.battV, ads2);
+  		telem.pyro1Stat = adcPyroStatus(telem.battV, ads2_0);
+  		telem.pyro2Stat = adcPyroStatus(telem.battV, ads2_1);
+  		telem.pyro3Stat = adcPyroStatus(telem.battV, ads2_2);
+  		telem.pyro4Stat = adcPyroStatus(telem.battV, ads2_3);
+  		telem.pyro5Stat = adcPyroStatus(telem.battV, ads1_3);
 
   		//Misc vars
 		telem.timeSinceStartup = currentMillis;
@@ -547,10 +590,21 @@ void loop() {
 
 						switch (i+1) { //i plus one because 1st element zeroooo bb im sorry im really tired
 							case 1:
-								digitalWrite(FETONE_PIN, LOW);
+								digitalWrite(PYRO1_PIN, LOW);
 								break;
 							case 2:
-								digitalWrite(FETTWO_PIN, LOW);
+								digitalWrite(PYRO2_PIN, LOW);
+								break;
+							case 3:
+								digitalWrite(PYRO3_PIN, LOW);
+								break;
+							case 4:
+								digitalWrite(PYRO4_PIN, LOW);
+								break;
+							case 5:
+								digitalWrite(PYRO5_PIN, LOW);
+								break;
+
 						}
 					}
 				}
@@ -562,8 +616,11 @@ void loop() {
 			pyrosInUse = 0;
 
 			debugPrintln("[PYRO] all pyros off");
-			digitalWrite(FETONE_PIN, LOW);
-			digitalWrite(FETTWO_PIN, LOW);
+			digitalWrite(PYRO1_PIN, LOW);
+			digitalWrite(PYRO2_PIN, LOW);
+			digitalWrite(PYRO3_PIN, LOW);
+			digitalWrite(PYRO4_PIN, LOW);
+			digitalWrite(PYRO5_PIN, LOW);
 		}
 
 	}
@@ -612,8 +669,8 @@ void sendTelemetry() {
 	// 9 - ori x, y, z
 	// 10 - pos x, y, z
 	// 11 - vel x, y, z
-	// 12 - pyro1 cont, pyro2 cont, pyro3 cont
-	// 13 - pyro4 cont, pyro5 cont, blank
+	// 12 - pyro1 status, pyro2 status, pyro3 status
+	// 13 - pyro4 status, pyro5 status, blank
 	// 14 - pyro1 fire, pyro2 fire, pyro3 fire
 	// 15 - pyro4 fire, pyro5 fire, blank	
 	// 16 - tvc x, tvc y, blank
@@ -633,20 +690,24 @@ void sendTelemetry() {
 	sendRadioPacket(GETTELEM, 10, telem.posX, telem.posY, telem.posZ);
 	sendRadioPacket(GETTELEM, 11, telem.velX, telem.velY, telem.velZ);
 
-	sendRadioPacket(GETTELEM, 12, telem.pyro1Cont, telem.pyro2Cont, telem.pyro3Cont);
-	sendRadioPacket(GETTELEM, 13, telem.pyro4Cont, telem.pyro5Cont, 0);
+	sendRadioPacket(GETTELEM, 12, telem.pyro1Stat, telem.pyro2Stat, telem.pyro3Stat);
+	sendRadioPacket(GETTELEM, 13, telem.pyro4Stat, telem.pyro5Stat, 0);
+
 	sendRadioPacket(GETTELEM, 14, telem.pyro1Fire, telem.pyro2Fire, telem.pyro3Fire);
 	sendRadioPacket(GETTELEM, 15, telem.pyro4Fire, telem.pyro5Fire, 0);
 
 	sendRadioPacket(GETTELEM, 16, telem.tvcX, telem.tvcY, 0);
 }
 
-bool adcPyroContinuity(float inpVoltage, int16_t pyroVoltage) {
-	float vDrop = inpVoltage-((float)pyroVoltage*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_PYRO);
-	if (vDrop > ADC_PYRO_VDROP_THRESH) {
-		return true;
+int adcPyroStatus(float inpVoltage, int16_t pyroReading) {
+	float vDrop = inpVoltage-((float)pyroReading*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_PYRO);
+	if (vDrop < ADC_PYRO_THRESH_SHORT) {
+		return 2; //2 = shorted
+	} else if (vDrop < ADC_PYRO_THRESH_CONT) {
+		return 1; //1 = continuity ok!
+	} else {
+		return 0; //0 = disconnected
 	}
-	return false;
 }
 
 void configureInitialConditions() {
@@ -656,6 +717,8 @@ void configureInitialConditions() {
 	dataLoggingState = DL_ENABLED_5HZ;
 	telemetryState = TEL_DISABLED;
 	telemetryConnectionState = TEL_DISCONNECTED;
+
+	analogWrite
 
 	int t = 1400;
 	for (int i=0; i<3; i++) {
@@ -699,10 +762,20 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 
 				switch (nChannel) {
 					case 1:
-						digitalWrite(FETONE_PIN, HIGH);
+						digitalWrite(PYRO1_PIN, HIGH);
 						break;
 					case 2:
-						digitalWrite(FETTWO_PIN, HIGH);
+						digitalWrite(PYRO2_PIN, HIGH);
+						break;
+					case 3:
+						digitalWrite(PYRO3_PIN, HIGH);
+						break;
+					case 4:
+						digitalWrite(PYRO4_PIN, HIGH);
+						break;
+					case 5:
+						digitalWrite(PYRO5_PIN, HIGH);
+						break;
 				}
 
 				return true;

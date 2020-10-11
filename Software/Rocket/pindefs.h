@@ -39,10 +39,10 @@ PYRO PINS
 TVC PINS
 */
 
-#define TVC_CH1_X 22
-#define TVC_CH1_Y 23
-#define TVC_CH2_X 5
-#define TVC_CH2_Y 6
+#define TVC_CH1_X_PIN 22
+#define TVC_CH1_Y_PIN 23
+#define TVC_CH2_X_PIN 5
+#define TVC_CH2_Y_PIN 6
 
 /*
 ROLL MOTOR PINS
