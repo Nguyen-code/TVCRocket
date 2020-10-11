@@ -535,12 +535,12 @@ void loop() {
 
 		gyroOut = ori.toEuler();
 
-		locX = gyroOut.roll*57.2958*1.7;
-		locY = gyroOut.pitch*57.2958*1.7; //pid x
-		locZ = gyroOut.yaw*57.2958*1.7; //pid y
+		locX = gyroOut.roll*1.7;
+		locY = gyroOut.pitch*1.7; //pid x
+		locZ = gyroOut.yaw*1.7; //pid y
 
-		zAxis.update(locZ, dtOri);
-	  	yAxis.update(locY, dtOri);
+		zAxis.update(locZ*57.2958, dtOri);
+	  	yAxis.update(locY*57.2958, dtOri);
 	  	lastOriMicros = micros();
 	}
 
@@ -552,8 +552,8 @@ void loop() {
 		float yAng = yAxis.getLast();
 
 		//Roll correction required
-		double cs = cos(-locX*0.0174533);
-		double sn = sin(-locX*0.0174533);
+		double cs = cos(-locX);
+		double sn = sin(-locX);
 
 		float trueYOut = (yAng*cs) - (zAng*sn);
 		float trueZOut = (yAng*sn) + (zAng*cs);
@@ -1066,7 +1066,7 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 void writeTVCCH1(float x, float y) {
 	x = constrain(x, -SERVO_RANGE, SERVO_RANGE);
 	y = constrain(y, -SERVO_RANGE, SERVO_RANGE);
-	
+
 	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_Y_CH1.write(90 + (y * SERVO_MULT) + TVC_Y_CH1_OFFSET);
 }
