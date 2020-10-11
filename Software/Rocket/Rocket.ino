@@ -28,17 +28,34 @@ https://github.com/luisllamasbinaburo/Arduino-Interpolation
 
 optimizations:
 telem can use different packet struct?
+potential for PWM resolution changing? https://www.pjrc.com/teensy/td_pulse.html
 
 
 things to test:
 pyro channels (all 5)
 servo movement and centering
 PID values (duh)
-constants for adc
-short v cont detection adc
 flash chip!
 sd!
+max travel constants
+reset I in PID before liftoff
+IMU use interrupts
 
+self test where rocket checks the following:
+- rail voltages ok
+- batt v within range
+- pyro continuous vs short detect - make sure not shorted
+
+zeroing
+
+ori stuff
+1) start in calibrate mode on pad
+2) complementary filter while on pad
+3) zero roll and PID I value right before launch
+4) launch go gyro only
+Also use interrupts for sensor
+
+make constant for servo angle to tvc mount angle
 
 */
 
@@ -46,11 +63,15 @@ sd!
 //External libs
 #include <SPI.h>
 #include <SD.h>
-#include <ADS1X15.h>
+#include "libs/ADS1X15/ADS1X15.cpp"
 #include <Servo.h>
 #include <RH_RF95.h>
+#include "libs/PID/pid.cpp"
+#include "libs/BMI088/BMI088.cpp"
+#include "libs/Orientation/Quaternion.cpp"
+#include "libs/Orientation/Orientation.cpp"
 
-//Internal header fils
+//Internal header files
 #include "states.h"
 #include "pindefs.h"
 #include "constants.h"
@@ -59,7 +80,7 @@ sd!
 DEBUG
 */
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -91,6 +112,7 @@ ChuteStates chuteState = C_DISARMED;
 DataLoggingStates dataLoggingState = DL_DISABLED;
 TelemSendStates telemetryState = TEL_DISABLED;
 TelemConnStates telemetryConnectionState = TEL_DISCONNECTED;
+OriMode oriMode = INIT;
 
 /*
 RADIO
@@ -205,11 +227,11 @@ struct TELEMETRY {
 	int gpsSats;
 
 	//Pyro channel data
-	int pyro1Stat; //Status: 0=disconnected, 1=continuity OK, 2=short
-	int pyro2Stat;
-	int pyro3Stat;
-	int pyro4Stat;
-	int pyro5Stat;
+	bool pyro1Cont;
+	bool pyro2Cont;
+	bool pyro3Cont;
+	bool pyro4Cont;
+	bool pyro5Cont;
 	bool pyro1Fire;
 	bool pyro2Fire;
 	bool pyro3Fire;
@@ -229,6 +251,11 @@ ADC CONFIG
 ADS1015 ADS1(ADC1_I2C_ADDR);
 ADS1015 ADS2(ADC2_I2C_ADDR);
 
+/*
+GYRO/ACCELEROMETER SETUP
+*/
+Bmi088Accel accel(Wire,ACC_I2C_ADDR);
+Bmi088Gyro gyro(Wire,GYRO_I2C_ADDR);
 
 /*
 BUZZER CONFIG
@@ -242,6 +269,21 @@ int toneFreqQueue[toneBufferLength];
 int toneDelayQueue[toneBufferLength];
 unsigned long lastToneStart = 0;
 byte toneStackPos = 0;
+
+/*
+LED CONFIG
+*/
+
+unsigned long lastLED = 0;
+int LEDDelay = 1000;
+
+const byte ledBufferLength = 20;
+int ledRQueue[ledBufferLength];
+int ledGQueue[ledBufferLength];
+int ledBQueue[ledBufferLength];
+int ledDelayQueue[ledBufferLength];
+unsigned long lastLEDStart = 0;
+byte ledStackPos = 0;
 
 /*
 PYRO CHANNEL CONFIG
@@ -259,22 +301,19 @@ Servo TVC_Y_CH1;
 Servo TVC_X_CH2;
 Servo TVC_Y_CH2;
 
+PID zAxis(PID_Z_P, PID_Z_I, PID_Z_D, 0);
+PID yAxis(PID_Y_P, PID_Y_I, PID_Y_D, 0);
+
 
 /*
 MISC VARS
 */
 int loopCounter = 0;
 
-/*
-SETTINGS AND PINDEFS
-*/
-
-const bool buzzerEnabled = false;
-
 unsigned long lastSensorUpdate = 0;
 const int sensorUpdateDelay = 200;
 
-void setup() {
+void setup() {	
 	//Setup pin states
 	pinMode(IND_R_PIN, OUTPUT);
 	pinMode(IND_G_PIN, OUTPUT);
@@ -287,35 +326,27 @@ void setup() {
 	pinMode(PYRO4_PIN, OUTPUT);
 	pinMode(PYRO5_PIN, OUTPUT);
 
-	pinMode(TVC_CH1_X, OUTPUT);
-	pinMode(TVC_CH1_Y, OUTPUT);
-	pinMode(TVC_CH2_X, OUTPUT);
-	pinMode(TVC_CH2_Y, OUTPUT);
+	pinMode(TVC_X_CH1_PIN, OUTPUT);
+	pinMode(TVC_Y_CH1_PIN, OUTPUT);
+	pinMode(TVC_X_CH2_PIN, OUTPUT);
+	pinMode(TVC_Y_CH2_PIN, OUTPUT);
 
 	pinMode(ROLL_FIN, OUTPUT);
 	pinMode(ROLL_RIN, OUTPUT);
 
-	pinMode(SD_CS, OUTPUT);
 	pinMode(SD_INS, INPUT);
-
-	pinMode(RADIO_RESET, OUTPUT);
-	pinMode(RADIO_IRQ, INPUT);
-	pinMode(RADIO_CS, OUTPUT);
-
-	pinMode(FLASH_CS, OUTPUT);
+	//Note: do not use pinMode on any of the SPI pins otherwise stuff doesn't work!
 
 	//TVC Setup
-	analogWriteResolution(14);
+	TVC_X_CH1.attach(TVC_X_CH1_PIN); //Attach all servos to their respective pins
+	TVC_Y_CH1.attach(TVC_Y_CH1_PIN);
+	TVC_X_CH2.attach(TVC_X_CH2_PIN);
+	TVC_Y_CH2.attach(TVC_Y_CH2_PIN);
 
-	TVC_CH1_X.attach(TVC_CH1_X_PIN); //Attach all servos to their respective pins
-	TVC_CH1_Y.attach(TVC_CH1_Y_PIN);
-	TVC_CH2_X.attach(TVC_CH2_X_PIN);
-	TVC_CH2_Y.attach(TVC_CH2_Y_PIN);
-
-	TVC_CH1_X.write(90+TVC_CH1_X_OFFSET); //Write all servos to center
-	TVC_CH1_Y.write(90+TVC_CH1_Y_OFFSET);
-	TVC_CH2_X.write(90+TVC_CH2_X_OFFSET);
-	TVC_CH2_Y.write(90+TVC_CH2_Y_OFFSET);
+	TVC_X_CH1.write(90+TVC_X_CH1_OFFSET); //Write all servos to center
+	TVC_Y_CH1.write(90+TVC_Y_CH1_OFFSET);
+	TVC_X_CH2.write(90+TVC_X_CH2_OFFSET);
+	TVC_Y_CH2.write(90+TVC_Y_CH2_OFFSET);
 
 	//Init serial
 	if (debug) {
@@ -325,9 +356,12 @@ void setup() {
 	//Setup rocket for initial conditions before initialization
 	configureInitialConditions(); 
 
+	boolean error = false;
+
 	//Setup radio
 	if (!radio.init()) {
-		errorInitializing();
+		Serial.println("[INIT] Radio failed to initialize");
+		error = true;
 	} else {
 		debugPrintln("[INIT] RADIO OK");
 	}
@@ -341,16 +375,78 @@ void setup() {
 		debugPrintln("[INIT] SD OK");
 	}
 
+	//Setup BMI088
+	if (!accel.begin()) {
+		Serial.println("[INIT] BMI088 accel failed to initialize");
+		error = true;
+	} else {
+		debugPrintln("[INIT] ACCEL INIT OK");
+	}
+	if (!gyro.begin()) {
+		Serial.println("[INIT] BMI088 gyro failed to initialize");
+		error = true;
+	} else {
+		debugPrintln("[INIT] GYRO INIT OK");
+	}
+
+	//Setup ODR and range
+	gyro.setOdr(Bmi088Gyro::ODR_2000HZ_BW_532HZ);
+	gyro.setRange(Bmi088Gyro::RANGE_2000DPS);
+
+	accel.setOdr(Bmi088Accel::ODR_1600HZ_BW_280HZ);
+	accel.setRange(Bmi088Accel::RANGE_24G);
+
 	//Setup ADS1015 #1
-	ADS1.begin();
-  	ADS1.setGain(0);
-  	debugPrintln("[INIT] ADS1 OK");
+	if (!ADS1.begin()) {
+		error = true;
+		Serial.println("[INIT] ADS1 failed to initialize");
+	} else {
+		debugPrintln("[INIT] ADS1 OK");
+	}
+  	ADS1.setGain(1);
+  	
 
   	//Setup ADS1015 #2
-	ADS2.begin();
-  	ADS2.setGain(0);
-  	debugPrintln("[INIT] ADS2 OK");
+	if (!ADS2.begin()) {
+		error = true;
+		Serial.println("[INIT] ADS2 failed to initialize");
+	} else {
+		debugPrintln("[INIT] ADS2 OK");
+	}
+  	ADS2.setGain(1);
+
+  	if (error) {
+  		analogWrite(IND_G_PIN, 0);
+  		analogWrite(IND_R_PIN, 127);
+  		analogWrite(IND_B_PIN, 0);
+  		while(1);
+  	} else {
+  		analogWrite(IND_G_PIN, 127);
+  		analogWrite(IND_R_PIN, 0);
+  		analogWrite(IND_B_PIN, 0);
+  		delay(100);
+  		analogWrite(IND_G_PIN, 0);
+  		analogWrite(IND_R_PIN, 0);
+  		analogWrite(IND_B_PIN, 0);
+	}
+	
 }
+
+
+EulerAngles gyroMeasure;
+EulerAngles gyroOut;
+
+Orientation ori;
+float locX,locY,locZ;
+
+float gbiasX, gbiasY, gbiasZ;
+float abiasX, abiasY;
+unsigned long biasStart;
+int biasCount = 0;
+
+unsigned long currentMicros;
+unsigned long lastOriMicros;
+unsigned long lastTVCMicros;
 
 void loop() {
 	unsigned long currentMillis = millis();
@@ -375,9 +471,106 @@ void loop() {
 	}
 
 	/*
+	ESSENTIAL ORIENTATION CALCULATIONS
+	*/
+
+	currentMicros = micros();
+	double dtOri = (double)(currentMicros-lastOriMicros) / 1000000.0;
+	double dtTVC = (double)(currentMicros-lastTVCMicros) / 1000000.0;
+
+	if (dtOri > 0.002f) {
+		if (oriMode == COMPLEMENTARY) {
+			gyro.readSensor();
+
+			gyroMeasure.roll = gyro.getGyroX_rads() + gbiasX;
+			gyroMeasure.pitch = -(gyro.getGyroY_rads() + gbiasY);
+			gyroMeasure.yaw = -(gyro.getGyroZ_rads() + gbiasZ);
+
+			ori.update(gyroMeasure, dtOri);
+
+			accel.readSensor();
+			Quaternion accVec(accel.getAccelX_mss() + abiasX, accel.getAccelY_mss() + abiasY, accel.getAccelZ_mss());
+
+			ori.applyComplementary(accVec,0.02);
+		} else if (oriMode == GYRONLY) {
+			gyro.readSensor();
+			gyroMeasure.roll = gyro.getGyroX_rads() + gbiasX;
+			gyroMeasure.pitch = gyro.getGyroY_rads() + gbiasY;
+			gyroMeasure.yaw = gyro.getGyroZ_rads() + gbiasZ;
+
+			ori.update(gyroMeasure, dtOri);
+		} else if (oriMode == CALCBIASES) {
+			gyro.readSensor();
+			gbiasX += (double)gyro.getGyroX_rads();
+			gbiasY += (double)gyro.getGyroY_rads();
+			gbiasZ += (double)gyro.getGyroZ_rads();
+			accel.readSensor();
+			abiasX += accel.getAccelX_mss();
+			abiasY += accel.getAccelY_mss();
+			biasCount++;
+
+			if (currentMicros - biasStart > 5000000) { //5sec
+				abiasX /= biasCount; //Find bias in 1 msec
+				abiasY /= biasCount;
+				gbiasX /= biasCount; //Find bias in 1 msec
+				gbiasY /= biasCount;
+				gbiasZ /= biasCount;
+
+				Serial.print("gbiasX=");
+				Serial.println(gbiasX, 5);
+				Serial.print("gbiasY=");
+				Serial.println(gbiasY, 5);
+				Serial.print("gbiasZ=");
+				Serial.println(gbiasZ, 5);
+				Serial.print("abiasX=");
+				Serial.println(abiasX, 5);
+				Serial.print("abiasY=");
+				Serial.println(abiasY, 5);
+				oriMode = GYRONLY;
+			}
+		} else {
+			biasStart = micros();
+			oriMode = CALCBIASES;
+		}
+
+		gyroOut = ori.toEuler();
+
+		locX = gyroOut.roll*57.2958*1.7;
+		locY = gyroOut.pitch*57.2958*1.7; //pid x
+		locZ = gyroOut.yaw*57.2958*1.7; //pid y
+
+		zAxis.update(locZ, dtOri);
+	  	yAxis.update(locY, dtOri);
+	  	lastOriMicros = micros();
+	}
+
+	/*
+	PID UPDATES
+	*/
+	if (dtTVC > 0.02f) {
+		float zAng = zAxis.getLast();
+		float yAng = yAxis.getLast();
+
+		//Roll correction required
+		float cs = cos(-locX);
+		float sn = sin(-locX);
+
+		float trueYOut = (yAng*cs) - (zAng*sn);
+		float trueZOut = (yAng*sn) + (zAng*cs);
+
+		writeTVCCH1(trueZOut, trueYOut);
+		lastTVCMicros = micros();
+	}
+
+	/*
 	NON ESSENTIAl SENSOR UPDATES
 	*/
 	if (currentMillis - lastSensorUpdate > sensorUpdateDelay) {
+		Serial.print("pitch="); Serial.println(locY);
+		Serial.print("yaw="); Serial.println(locZ);
+		Serial.println();
+
+
 		debugPrintln("[SENSOR] update");
 		//First set state variables
 		telem.fMode = flightMode;
@@ -399,24 +592,22 @@ void loop() {
 		int16_t ads1_1 = ADS1.readADC(1);  
 		int16_t ads1_2 = ADS1.readADC(2);  
 		int16_t ads1_3 = ADS1.readADC(3);
-		int16_t ads2_0 = ADS1.readADC(0);  
-		int16_t ads2_1 = ADS1.readADC(1);  
-		int16_t ads2_2 = ADS1.readADC(2);  
-		int16_t ads2_3 = ADS1.readADC(3);
-
-		float f = ADS1.toVoltage(1);
+		int16_t ads2_0 = ADS2.readADC(0);  
+		int16_t ads2_1 = ADS2.readADC(1);  
+		int16_t ads2_2 = ADS2.readADC(2);  
+		int16_t ads2_3 = ADS2.readADC(3);
 
 		//Calculate line voltages using conversion factors
-		telem.battV = (float)ads1_0*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VBUS; //use conv factor
-  		telem.servoV = (float)ads1_1*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VSERVO;
-  		telem.rollMotorV = (float)ads1_2*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_VMOTOR;
+		telem.battV = ads1_0*ADC_DIV_FACTOR_V/ADC_RES_DIV_FACTOR_VBUS; //use conv factor
+  		telem.servoV = ads1_1*ADC_DIV_FACTOR_V/ADC_RES_DIV_FACTOR_VSERVO;
+  		telem.rollMotorV = ads1_2*ADC_DIV_FACTOR_V/ADC_RES_DIV_FACTOR_VMOTOR;
 
-  		//Calculate resistance on pyro channels
-  		telem.pyro1Stat = adcPyroStatus(telem.battV, ads2_0);
-  		telem.pyro2Stat = adcPyroStatus(telem.battV, ads2_1);
-  		telem.pyro3Stat = adcPyroStatus(telem.battV, ads2_2);
-  		telem.pyro4Stat = adcPyroStatus(telem.battV, ads2_3);
-  		telem.pyro5Stat = adcPyroStatus(telem.battV, ads1_3);
+  		//Calculate status of pyro channels (short, continuity ok,)
+  		telem.pyro1Cont = adcPyroContinuity(telem.battV, ads2_0);
+  		telem.pyro2Cont = adcPyroContinuity(telem.battV, ads2_1);
+  		telem.pyro3Cont = adcPyroContinuity(telem.battV, ads2_2);
+  		telem.pyro4Cont = adcPyroContinuity(telem.battV, ads2_3);
+  		telem.pyro5Cont = adcPyroContinuity(telem.battV, ads1_3);
 
   		//Misc vars
 		telem.timeSinceStartup = currentMillis;
@@ -443,7 +634,7 @@ void loop() {
 	*/
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
 		debugPrintln("[RADIO] hb");
-		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
+		//sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
 		lastHeartbeat = currentMillis;
 	}
 
@@ -452,7 +643,6 @@ void loop() {
 	*/
 	if (toneStackPos > 0) {
 		if (currentMillis - lastToneStart > toneDelayQueue[0]) {
-			noTone(BUZZER_PIN);
 			for (int i=1; i<toneBufferLength; i++) { //Left shift all results by 1
 				toneFreqQueue[i-1] = toneFreqQueue[i];
 				toneDelayQueue[i-1] = toneDelayQueue[i];
@@ -463,6 +653,8 @@ void loop() {
 					tone(BUZZER_PIN, toneFreqQueue[0]); //start new tone
 				}
 				lastToneStart = currentMillis;
+			} else {
+				noTone(BUZZER_PIN); //otherwise just stop playing
 			}
 		}
 	}
@@ -481,7 +673,7 @@ void loop() {
 				break;
 			case LAUNCH:
 			case DESCEND:
-				buzzerDelay = 10000;
+				buzzerDelay = 3000;
 				break;
 			case COPYINGSD:
 				addToneQueue(1500, 150);
@@ -507,22 +699,78 @@ void loop() {
 	}
 
 	/*
+	LED
+	*/
+	if (ledStackPos > 0) {
+		if (currentMillis - lastLEDStart > ledDelayQueue[0]) {
+			for (int i=1; i<ledBufferLength; i++) { //Left shift all results by 1
+				ledRQueue[i-1] = ledRQueue[i];
+				ledGQueue[i-1] = ledGQueue[i];
+				ledBQueue[i-1] = ledBQueue[i];
+				ledDelayQueue[i-1] = ledDelayQueue[i];
+			}
+			ledStackPos--; //we've removed one from the stack
+			if (ledStackPos > 0) { //is there something new to start playing?
+				analogWrite(IND_R_PIN, ledRQueue[0]);
+				analogWrite(IND_G_PIN, ledGQueue[0]);
+				analogWrite(IND_B_PIN, ledBQueue[0]);
+				lastLEDStart = currentMillis;
+			} else { //otherwise nothing left to do, so stop
+				analogWrite(IND_R_PIN, 0);
+				analogWrite(IND_G_PIN, 0);
+				analogWrite(IND_B_PIN, 0);
+			}
+		}
+	}
+
+	if (currentMillis - lastLED > LEDDelay) {
+		switch (flightMode) {
+			case BOOTING:
+			case CONN_WAIT:
+				addLEDQueue(0, 0, 127, 250);
+				LEDDelay = 1000;
+				break;
+			case IDLE:
+				addLEDQueue(127, 127, 0, 250);
+				LEDDelay = 1000;
+				break;
+			case LAUNCH:
+			case DESCEND:
+				addLEDQueue(0, 127, 0, 100);
+				LEDDelay = 250;
+				break;
+			case COPYINGSD:
+				addLEDQueue(127, 127, 0, 500);
+				addLEDQueue(0, 0, 127, 500);
+				LEDDelay = 1000;
+				break;
+			case LANDED:
+				addLEDQueue(127, 0, 0, 250);
+				addLEDQueue(0, 127, 0, 250);
+				addLEDQueue(0, 0, 127, 250);
+				LEDDelay = 750;
+				break;
+		}
+		lastLED = currentMillis;
+	}
+
+	/*
 	RADIO
 	*/
 	if (radio.available()) {
-		RadioPacket rx;
-		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+		struct RadioPacket *rx; //get poInteRiZeD!
+		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN]; //no buffer overruns here!
     	uint8_t len = sizeof(buf);
 		radio.recv(buf, &len);
 
-		rx = (RadioPacket)buf;
+		rx = (struct RadioPacket *)buf; //mm yes tasty struct conversions
 
-		switch (rx.id) {
+		switch (rx->id) {
 			case GETSTATE:
 				sendRadioPacket(GETSTATE, 0, flightMode, pyroState, telemetryState);
 				break;
 			case SETSTATE:
-				switch ((int)rx.data1) {
+				switch ((int)rx->data1) {
 					case 0:
 						flightMode = CONN_WAIT;
 						break;
@@ -547,14 +795,14 @@ void loop() {
 				sendTelemetry();
 				break;
 			case PYROARMING:
-				if (rx.data1) {
+				if (rx->data1) {
 					pyroState = PY_ARMED;
 				} else {
 					pyroState = PY_DISARMED;
 				}
 				break;
 			case FIREPYRO:
-				firePyroChannel(rx.data1, rx.data2);
+				firePyroChannel(rx->data1, rx->data2);
 				break;
 		}
 
@@ -690,8 +938,8 @@ void sendTelemetry() {
 	sendRadioPacket(GETTELEM, 10, telem.posX, telem.posY, telem.posZ);
 	sendRadioPacket(GETTELEM, 11, telem.velX, telem.velY, telem.velZ);
 
-	sendRadioPacket(GETTELEM, 12, telem.pyro1Stat, telem.pyro2Stat, telem.pyro3Stat);
-	sendRadioPacket(GETTELEM, 13, telem.pyro4Stat, telem.pyro5Stat, 0);
+	sendRadioPacket(GETTELEM, 12, telem.pyro1Cont, telem.pyro2Cont, telem.pyro3Cont);
+	sendRadioPacket(GETTELEM, 13, telem.pyro4Cont, telem.pyro5Cont, 0);
 
 	sendRadioPacket(GETTELEM, 14, telem.pyro1Fire, telem.pyro2Fire, telem.pyro3Fire);
 	sendRadioPacket(GETTELEM, 15, telem.pyro4Fire, telem.pyro5Fire, 0);
@@ -699,14 +947,16 @@ void sendTelemetry() {
 	sendRadioPacket(GETTELEM, 16, telem.tvcX, telem.tvcY, 0);
 }
 
-int adcPyroStatus(float inpVoltage, int16_t pyroReading) {
-	float vDrop = inpVoltage-((float)pyroReading*ADC_DIV_FACTOR_V*ADC_RES_DIV_FACTOR_PYRO);
-	if (vDrop < ADC_PYRO_THRESH_SHORT) {
-		return 2; //2 = shorted
-	} else if (vDrop < ADC_PYRO_THRESH_CONT) {
-		return 1; //1 = continuity ok!
+boolean adcPyroContinuity(float battV, int16_t pyroReading) {
+	double vDrop = battV-((double)pyroReading*(double)ADC_DIV_FACTOR_V*(double)ADC_RES_DIV_FACTOR_PYRO);
+	//Serial.print("Drop=");
+	//Serial.print(vDrop);
+	if (vDrop <= ADC_PYRO_THRESH_CONT) {
+		//Serial.println(" Stat=Cont");
+		return true; //We got dat continuity lads
 	} else {
-		return 0; //0 = disconnected
+		//Serial.println(" Stat=Disconn");
+		return false; //Disconnected :(
 	}
 }
 
@@ -718,7 +968,9 @@ void configureInitialConditions() {
 	telemetryState = TEL_DISABLED;
 	telemetryConnectionState = TEL_DISCONNECTED;
 
-	analogWrite
+	analogWrite(IND_B_PIN, 127);
+	analogWrite(IND_G_PIN, 0);
+	analogWrite(IND_R_PIN, 0);
 
 	int t = 1400;
 	for (int i=0; i<3; i++) {
@@ -727,6 +979,9 @@ void configureInitialConditions() {
 		delay(100);
 	}
 	noTone(BUZZER_PIN);
+
+	writeTVCCH1(0, 0);
+	writeTVCCH1(30, 30); //Up and right
 
 	delay(100);
 	transitionMode(CONN_WAIT);
@@ -741,6 +996,26 @@ bool addToneQueue(int freq, int delay) {
 			if (toneStackPos == 1) { //If it's the first sound, start playing it
 				tone(BUZZER_PIN, toneFreqQueue[0]); //start new tone
 				lastToneStart = millis();
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+bool addLEDQueue(byte r, byte g, byte b, int delay) {
+	if (indicatorEnabled) {
+		if (ledStackPos < ledBufferLength && delay > 0) {
+			ledRQueue[ledStackPos] = r;
+			ledGQueue[ledStackPos] = g;
+			ledBQueue[ledStackPos] = b;
+			ledDelayQueue[ledStackPos] = delay;
+			ledStackPos++; //always increase stack pointer
+			if (ledStackPos == 1) { //If it's the first sound, start playing it
+				analogWrite(IND_R_PIN, ledRQueue[0]);
+				analogWrite(IND_G_PIN, ledGQueue[0]);
+				analogWrite(IND_B_PIN, ledBQueue[0]);
+				lastLEDStart = millis();
 			}
 			return true;
 		}
@@ -785,6 +1060,21 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 	return false;
 }
 
+void writeTVCCH1(float x, float y) {
+	x = constrain(x, -45, 45);
+	y = constrain(y, -45, 45);
+	//Serial.println(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
+	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
+	TVC_Y_CH1.write(90 + (y * SERVO_MULT) + TVC_Y_CH1_OFFSET);
+}
+
+void writeTVCCH2(float x, float y) {
+	x = constrain(x, -45, 45);
+	y = constrain(y, -45, 45);
+	TVC_X_CH2.write(90 + (x * SERVO_MULT) + TVC_X_CH2_OFFSET);
+	TVC_Y_CH2.write(90 + (y * SERVO_MULT) + TVC_Y_CH2_OFFSET);
+}
+
 void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3) {
 	RadioPacket tx;
 	tx.id = id;
@@ -793,5 +1083,5 @@ void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3)
 	tx.data2 = data2;
 	tx.data3 = data3;
 
-	radio.write(&tx, sizeof(tx));
+	radio.send((uint8_t *)&tx, sizeof(struct RadioPacket)); //Gotta love this cursed line of C
 }

@@ -211,18 +211,18 @@ void loop() {
 	}
 
 	if (radio.available()) {
-		RadioPacket rx;
-		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+		struct RadioPacket *rx; //get poInteRiZeD!
+		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN]; //no buffer overruns here!
     	uint8_t len = sizeof(buf);
 		radio.recv(buf, &len);
 
-		rx = (RadioPacket)buf;
+		rx = (struct RadioPacket *)buf; //mm yes tasty struct conversions
 
-		if (rx.id != 3) {
+		if (rx->id != 3) {
 			Serial.print("GOT CMD: ");
-			Serial.println(rx.id);
+			Serial.println(rx->id);
 		}
-		switch (rx.id) {
+		switch (rx->id) {
 			case HEARTBEAT:
 				rocketHBPacketCount++;
 				break;
@@ -231,7 +231,7 @@ void loop() {
 			case GETSTATE:
 				Serial.println("Current rocket internal state:");
 				Serial.print("FlightMode= ");
-				FlightMode fm = (FlightMode)rx.data1;
+				FlightMode fm = (FlightMode)rx->data1;
 				if (fm == BOOTING) {
 					Serial.println("Computer booting");
 				} else if (fm == CONN_WAIT) {
@@ -249,14 +249,14 @@ void loop() {
 				}
 
 				Serial.print("PyroState=");
-				if ((PyroStates)rx.data2 == PY_ARMED) {
+				if ((PyroStates)rx->data2 == PY_ARMED) {
 					Serial.println("Armed");
 				} else {
 					Serial.println("Disarmed");
 				}
 
 				Serial.print("TelemetryState=");
-				TelemSendStates tss = (TelemSendStates)rx.data3;
+				TelemSendStates tss = (TelemSendStates)rx->data3;
 				if (tss == TEL_ENABLED_5HZ) {
 					Serial.println("Enabled@5Hz");
 				} else if (tss == TEL_ENABLED_15HZ) {
@@ -282,5 +282,5 @@ void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3)
 	tx.data2 = data2;
 	tx.data3 = data3;
 
-	radio.send(tx, sizeof(tx));
+	radio.send((uint8_t *)&tx, sizeof(struct RadioPacket)); //Gotta love this cursed line of C
 }

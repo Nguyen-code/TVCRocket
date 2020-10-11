@@ -14,6 +14,13 @@ enum FlightMode {
 	LANDED
 };
 
+enum OriMode {
+	INIT,
+	COMPLEMENTARY,
+	GYRONLY,
+	CALCBIASES
+};
+
 
 enum PyroStates {
 	PY_ARMED,
