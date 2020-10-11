@@ -483,20 +483,20 @@ void loop() {
 			gyro.readSensor();
 
 			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
-			gyroMeasure.pitch = -(gyro.getGyroY_rads() + gbiasY);
-			gyroMeasure.yaw = (gyro.getGyroZ_rads() + gbiasZ);
+			gyroMeasure.pitch = -(gyro.getGyroZ_rads() + gbiasY);
+			gyroMeasure.yaw = -(gyro.getGyroY_rads() + gbiasZ);
 
 			ori.update(gyroMeasure, dtOri);
 
 			accel.readSensor();
-			Quaternion accVec(accel.getAccelX_mss() + abiasX, accel.getAccelY_mss() + abiasY, accel.getAccelZ_mss());
+			Quaternion accVec(accel.getAccelX_mss() + abiasX, -(accel.getAccelZ_mss() + abiasY), -(accel.getAccelY_mss()));
 
 			ori.applyComplementary(accVec,0.02);
 		} else if (oriMode == GYRONLY) {
 			gyro.readSensor();
 			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
-			gyroMeasure.pitch = -(gyro.getGyroY_rads() + gbiasY);
-			gyroMeasure.yaw = (gyro.getGyroZ_rads() + gbiasZ);
+			gyroMeasure.pitch = -(gyro.getGyroZ_rads() + gbiasY);
+			gyroMeasure.yaw = -(gyro.getGyroY_rads() + gbiasZ);
 
 			ori.update(gyroMeasure, dtOri);
 		} else if (oriMode == CALCBIASES) {
@@ -558,7 +558,7 @@ void loop() {
 		float trueYOut = (yAng*cs) - (zAng*sn);
 		float trueZOut = (yAng*sn) + (zAng*cs);
 
-		writeTVCCH1(trueYOut, -trueZOut);
+		writeTVCCH1(trueZOut, trueYOut);
 		lastTVCMicros = micros();
 	}
 
@@ -566,8 +566,8 @@ void loop() {
 	NON ESSENTIAl SENSOR UPDATES
 	*/
 	if (currentMillis - lastSensorUpdate > sensorUpdateDelay) {
-		Serial.print("pitch="); Serial.println(locY);
-		Serial.print("yaw="); Serial.println(locZ);
+		Serial.print("pitch="); Serial.println(locY*57.2958);
+		Serial.print("yaw="); Serial.println(locZ*57.2958);
 		Serial.println();
 
 
