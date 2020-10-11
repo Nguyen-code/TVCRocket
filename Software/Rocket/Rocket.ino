@@ -1064,11 +1064,9 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 }
 
 void writeTVCCH1(float x, float y) {
-	x = constrain(x, -20, 20);
-	y = constrain(y, -20, 20);
-	//x = -x;
-	//y = -y;
-	//Serial.println(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
+	x = constrain(x, -SERVO_RANGE, SERVO_RANGE);
+	y = constrain(y, -SERVO_RANGE, SERVO_RANGE);
+	
 	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_Y_CH1.write(90 + (y * SERVO_MULT) + TVC_Y_CH1_OFFSET);
 }

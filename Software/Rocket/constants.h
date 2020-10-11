@@ -26,20 +26,21 @@ const float PID_Y_P = 3;
 const float PID_Y_I = 0.00;
 const float PID_Y_D = 0.01;
 
-/*WORKING
-const float PID_Z_P = 1.5;
-const float PID_Z_I = 0.00;
-const float PID_Z_D = 0.2;
+//WORKING
+// const float PID_Z_P = 1.5;
+// const float PID_Z_I = 0.00;
+// const float PID_Z_D = 0.2;
 
-const float PID_Y_P = 1.5;
-const float PID_Y_I = 0.00;
-const float PID_Y_D = 0.2;
-*/
+// const float PID_Y_P = 1.5;
+// const float PID_Y_I = 0.00;
+// const float PID_Y_D = 0.2;
+
 
 /*
 SERVO CONSTANTS
 */
 #define SERVO_MULT 5
+#define SERVO_RANGE SERVO_MULT*1.5
 
 /*
 ADC RESISTOR DIVIDER CALCUALTIONS
