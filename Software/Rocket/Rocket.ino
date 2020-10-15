@@ -120,11 +120,11 @@ RADIO
 RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 
 struct RadioPacket {
-	byte id;
-	byte subID;
-	float data1;
-	float data2;
-	float data3;
+	uint8_t id;
+	uint8_t subID;
+	uint8_t data1;
+	uint8_t data2;
+	uint8_t data3;
 };
 
 /*
@@ -167,7 +167,7 @@ typedef enum {
 } RadioCommands;
 
 const int radioTimeoutDelay = 5000;
-long lastRadioRecieveTime = (long)-radioTimeoutDelay;
+unsigned long lastRadioRecieveTime = 0;
 
 /*
 TELEMETRY STRUCT
@@ -313,6 +313,16 @@ int loopCounter = 0;
 unsigned long lastSensorUpdate = 0;
 const int sensorUpdateDelay = 200;
 
+bool gyro_ready = false;
+bool accel_ready = false;
+
+void gyro_drdy() {
+	gyro_ready = true;
+}
+void accel_drdy() {
+	accel_ready = true;
+}
+
 void setup() {	
 	//Setup pin states
 	pinMode(IND_R_PIN, OUTPUT);
@@ -392,9 +402,15 @@ void setup() {
 	//Setup ODR and range
 	gyro.setOdr(Bmi088Gyro::ODR_2000HZ_BW_532HZ);
 	gyro.setRange(Bmi088Gyro::RANGE_2000DPS);
+	gyro.pinModeInt3(Bmi088Gyro::PUSH_PULL,Bmi088Gyro::ACTIVE_HIGH);
+	gyro.mapDrdyInt3(true);
+	attachInterrupt(ACCEL_INT, accel_drdy, RISING);
 
 	accel.setOdr(Bmi088Accel::ODR_1600HZ_BW_280HZ);
 	accel.setRange(Bmi088Accel::RANGE_24G);
+	accel.pinModeInt1(Bmi088Accel::PUSH_PULL,Bmi088Accel::ACTIVE_HIGH);
+	accel.mapDrdyInt1(true);
+	attachInterrupt(GYRO_INT, gyro_drdy, RISING);
 
 	//Setup ADS1015 #1
 	if (!ADS1.begin()) {
@@ -440,7 +456,6 @@ Orientation ori;
 float locX,locY,locZ;
 
 float gbiasX, gbiasY, gbiasZ;
-float abiasX, abiasY;
 unsigned long biasStart;
 int biasCount = 0;
 
@@ -477,9 +492,11 @@ void loop() {
 	currentMicros = micros();
 	double dtOri = (double)(currentMicros-lastOriMicros) / 1000000.0;
 	double dtTVC = (double)(currentMicros-lastTVCMicros) / 1000000.0;
+	if (dtOri > ORI_CALC_DELTA) {
+		if (oriMode == COMPLEMENTARY && gyro_ready && accel_ready) {
+			gyro_ready = false;
+			accel_ready = false;
 
-	if (dtOri > 0.002f) {
-		if (oriMode == COMPLEMENTARY) {
 			gyro.readSensor();
 
 			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
@@ -489,29 +506,30 @@ void loop() {
 			ori.update(gyroMeasure, dtOri);
 
 			accel.readSensor();
-			Quaternion accVec(accel.getAccelX_mss() + abiasX, -(accel.getAccelZ_mss() + abiasY), -(accel.getAccelY_mss()));
+			Quaternion accVec(accel.getAccelX_mss(), -(accel.getAccelZ_mss()), -(accel.getAccelY_mss()));
 
 			ori.applyComplementary(accVec,0.02);
-		} else if (oriMode == GYRONLY) {
+		} else if (oriMode == GYRONLY && gyro_ready) {
+			gyro_ready = false;
+
 			gyro.readSensor();
 			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
 			gyroMeasure.pitch = -(gyro.getGyroZ_rads() + gbiasY);
 			gyroMeasure.yaw = -(gyro.getGyroY_rads() + gbiasZ);
 
 			ori.update(gyroMeasure, dtOri);
-		} else if (oriMode == CALCBIASES) {
+		} else if (oriMode == CALCBIASES && gyro_ready) {
+			gyro_ready = false;
+
 			gyro.readSensor();
 			gbiasX += (double)gyro.getGyroX_rads();
 			gbiasY += (double)gyro.getGyroY_rads();
 			gbiasZ += (double)gyro.getGyroZ_rads();
-			accel.readSensor();
-			abiasX += accel.getAccelX_mss();
-			abiasY += accel.getAccelY_mss();
 			biasCount++;
 
-			if (currentMicros - biasStart > 3000000) { //3sec
-				abiasX /= biasCount; //Find bias in 1 reading
-				abiasY /= biasCount;
+			if (currentMicros - biasStart > 3000000) { //1.5sec
+				Serial.println("BIASCOUNT");
+				Serial.println(biasCount);
 				gbiasX /= biasCount; //Find bias in 1 reading
 				gbiasY /= biasCount;
 				gbiasZ /= biasCount;
@@ -522,10 +540,6 @@ void loop() {
 				Serial.println(gbiasY, 5);
 				Serial.print("gbiasZ=");
 				Serial.println(gbiasZ, 5);
-				Serial.print("abiasX=");
-				Serial.println(abiasX, 5);
-				Serial.print("abiasY=");
-				Serial.println(abiasY, 5);
 				oriMode = GYRONLY;
 			}
 		} else {
@@ -535,9 +549,9 @@ void loop() {
 
 		gyroOut = ori.toEuler();
 
-		locX = gyroOut.roll*1.7;
-		locY = gyroOut.pitch*1.7; //pid x
-		locZ = gyroOut.yaw*1.7; //pid y
+		locX = gyroOut.roll*GYRO_MULT;
+		locY = gyroOut.pitch*GYRO_MULT; //pid x
+		locZ = gyroOut.yaw*GYRO_MULT; //pid y
 
 		zAxis.update(locZ*57.2958, dtOri);
 	  	yAxis.update(locY*57.2958, dtOri);
@@ -547,7 +561,7 @@ void loop() {
 	/*
 	PID UPDATES
 	*/
-	if (dtTVC > 0.02f) {
+	if (dtTVC > SERVO_WRITE_DELTA) {
 		float zAng = zAxis.getLast();
 		float yAng = yAxis.getLast();
 
@@ -602,7 +616,7 @@ void loop() {
   		telem.servoV = ads1_1*ADC_DIV_FACTOR_V/ADC_RES_DIV_FACTOR_VSERVO;
   		telem.rollMotorV = ads1_2*ADC_DIV_FACTOR_V/ADC_RES_DIV_FACTOR_VMOTOR;
 
-  		//Calculate status of pyro channels (short, continuity ok,)
+  		//Calculate status of pyro channels (short, continuity ok)
   		telem.pyro1Cont = adcPyroContinuity(telem.battV, ads2_0);
   		telem.pyro2Cont = adcPyroContinuity(telem.battV, ads2_1);
   		telem.pyro3Cont = adcPyroContinuity(telem.battV, ads2_2);
@@ -633,8 +647,8 @@ void loop() {
 	HEARTBEAT
 	*/
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
-		debugPrintln("[RADIO] hb");
-		//sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
+		Serial.println("[RADIO] hb");
+		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
 		lastHeartbeat = currentMillis;
 	}
 
@@ -758,19 +772,20 @@ void loop() {
 	RADIO
 	*/
 	if (radio.available()) {
-		struct RadioPacket *rx; //get poInteRiZeD!
-		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN]; //no buffer overruns here!
-    	uint8_t len = sizeof(buf);
-		radio.recv(buf, &len);
+		RadioPacket rx; //get poInteRiZeD!
+		uint8_t datalen = sizeof(rx);
+		radio.recv((uint8_t*)&rx, &datalen);
 
-		rx = (struct RadioPacket *)buf; //mm yes tasty struct conversions
-
-		switch (rx->id) {
+		if (rx.id != 0) {
+			Serial.print("GOT ID: ");
+			Serial.println(rx.id);
+		}
+		switch (rx.id) {
 			case GETSTATE:
 				sendRadioPacket(GETSTATE, 0, flightMode, pyroState, telemetryState);
 				break;
 			case SETSTATE:
-				switch ((int)rx->data1) {
+				switch ((int)rx.data1) {
 					case 0:
 						flightMode = CONN_WAIT;
 						break;
@@ -795,28 +810,27 @@ void loop() {
 				sendTelemetry();
 				break;
 			case PYROARMING:
-				if (rx->data1) {
+				if (rx.data1) {
 					pyroState = PY_ARMED;
 				} else {
 					pyroState = PY_DISARMED;
 				}
 				break;
 			case FIREPYRO:
-				firePyroChannel(rx->data1, rx->data2);
+				firePyroChannel(rx.data1, rx.data2);
 				break;
 		}
 
-		lastRadioRecieveTime = (long)millis();
+		lastRadioRecieveTime = millis();
 	}
 
 	/*
 	RADIO TIME CHECK
 	*/
-	if (currentMillis - lastRadioRecieveTime > radioTimeoutDelay) {
-		//debugPrintln("[RADIO] disconnected");
+	currentMillis = millis(); //we might be a little behind here because interrupts, so make sure this is right
+	if ((currentMillis - lastRadioRecieveTime) > radioTimeoutDelay) {
 		telemetryConnectionState = TEL_DISCONNECTED;
 	} else {
-		//debugPrintln("[RADIO] connected");
 		telemetryConnectionState = TEL_CONNECTED;
 	}
 
@@ -982,7 +996,7 @@ void configureInitialConditions() {
 
 	writeTVCCH1(0, 0);
 	delay(1000);
-	writeTVCCH1(10, 10); //Up and right
+	writeTVCCH1(5, 5); //Up and right
 	delay(1000);
 	writeTVCCH1(0, 0);
 
@@ -1064,8 +1078,8 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 }
 
 void writeTVCCH1(float x, float y) {
-	x = constrain(x, -SERVO_RANGE, SERVO_RANGE);
-	y = constrain(y, -SERVO_RANGE, SERVO_RANGE);
+	x = constrain(x, -SERVO_RANGE_X, SERVO_RANGE_X);
+	y = constrain(y, -SERVO_RANGE_Y, SERVO_RANGE_Y);
 
 	TVC_X_CH1.write(90 + (x * SERVO_MULT) + TVC_X_CH1_OFFSET);
 	TVC_Y_CH1.write(90 + (y * SERVO_MULT) + TVC_Y_CH1_OFFSET);
@@ -1078,13 +1092,14 @@ void writeTVCCH2(float x, float y) {
 	TVC_Y_CH2.write(90 + (y * SERVO_MULT) + TVC_Y_CH2_OFFSET);
 }
 
-void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3) {
+void sendRadioPacket(uint8_t id, uint8_t subID, float data1, float data2, float data3) {
 	RadioPacket tx;
 	tx.id = id;
 	tx.subID = subID;
-	tx.data1 = data1;
-	tx.data2 = data2;
-	tx.data3 = data3;
+	tx.data1 = (uint8_t)data1;
+	tx.data2 = (uint8_t)data2;
+	tx.data3 = (uint8_t)data3;
 
-	radio.send((uint8_t *)&tx, sizeof(struct RadioPacket)); //Gotta love this cursed line of C
+	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
+	radio.waitPacketSent();
 }

@@ -2,11 +2,14 @@
 #include <SPI.h>
 #include <RH_RF95.h>
 #include "states.h"
+#include "pindefs.h"
 
 
 /*
 Screen code:
 http://www.nhdforum.newhavendisplay.com/index.php?topic=11609.0
+
+rssi change led color between green and red
 */
 
 /*
@@ -15,11 +18,11 @@ RADIO
 RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 
 struct RadioPacket {
-	byte id;
-	byte subID;
-	float data1;
-	float data2;
-	float data3;
+	uint8_t id;
+	uint8_t subID;
+	uint8_t data1;
+	uint8_t data2;
+	uint8_t data3;
 };
 
 /*
@@ -147,12 +150,31 @@ String serialBuffer = "";
 
 void setup() {
 	Serial.begin(115200);
+	//Setup pin states
+	pinMode(IND_R_PIN, OUTPUT);
+	pinMode(IND_G_PIN, OUTPUT);
+	pinMode(IND_B_PIN, OUTPUT);
+	pinMode(BUZZER_PIN, OUTPUT);
 
+	analogWrite(IND_B_PIN, 127);
+
+	bool error = false;
 	if (!radio.init()) {
-		errorInitializing();
+		error = true;
 	}
 	radio.setTxPower(23, false);
   	radio.setFrequency(868);
+
+  	if (error) {
+  		analogWrite(IND_G_PIN, 0);
+  		analogWrite(IND_R_PIN, 127);
+  		analogWrite(IND_B_PIN, 0);
+  		while(1);
+  	} else {
+  		analogWrite(IND_G_PIN, 127);
+  		analogWrite(IND_R_PIN, 0);
+  		analogWrite(IND_B_PIN, 0);
+  	}
 }
 
 void loop() {
@@ -163,7 +185,7 @@ void loop() {
 		Serial.print("Rate=");
 		Serial.print(packetRate);
 		Serial.print("Hz\tRSSI=");
-		Serial.println(radio.lastRSSI(), DEC);
+		Serial.println(radio.lastRssi(), DEC);
 		rocketHBPacketCount = 0;
 		lastPacketPrint = currentMillis;
 	}
@@ -177,7 +199,7 @@ void loop() {
 		char inChar = Serial.read();
 
 		if (inChar == ';') {
-			serialBuffer.toLowerCase();
+			serialBuffer.toLowerCase().trim();
 
 			Serial.print("Got command: ");
 			Serial.println(serialBuffer);
@@ -211,18 +233,15 @@ void loop() {
 	}
 
 	if (radio.available()) {
-		struct RadioPacket *rx; //get poInteRiZeD!
-		uint8_t buf[RH_RF95_MAX_MESSAGE_LEN]; //no buffer overruns here!
-    	uint8_t len = sizeof(buf);
-		radio.recv(buf, &len);
+		RadioPacket rx;
+		uint8_t datalen = sizeof(rx);
+		radio.recv((uint8_t*)&rx, &datalen);
 
-		rx = (struct RadioPacket *)buf; //mm yes tasty struct conversions
-
-		if (rx->id != 3) {
+		if (rx.id != 3 || true) {
 			Serial.print("GOT CMD: ");
-			Serial.println(rx->id);
+			Serial.println(rx.id);
 		}
-		switch (rx->id) {
+		switch (rx.id) {
 			case HEARTBEAT:
 				rocketHBPacketCount++;
 				break;
@@ -231,7 +250,7 @@ void loop() {
 			case GETSTATE:
 				Serial.println("Current rocket internal state:");
 				Serial.print("FlightMode= ");
-				FlightMode fm = (FlightMode)rx->data1;
+				FlightMode fm = (FlightMode)rx.data1;
 				if (fm == BOOTING) {
 					Serial.println("Computer booting");
 				} else if (fm == CONN_WAIT) {
@@ -249,14 +268,14 @@ void loop() {
 				}
 
 				Serial.print("PyroState=");
-				if ((PyroStates)rx->data2 == PY_ARMED) {
+				if ((PyroStates)rx.data2 == PY_ARMED) {
 					Serial.println("Armed");
 				} else {
 					Serial.println("Disarmed");
 				}
 
 				Serial.print("TelemetryState=");
-				TelemSendStates tss = (TelemSendStates)rx->data3;
+				TelemSendStates tss = (TelemSendStates)rx.data3;
 				if (tss == TEL_ENABLED_5HZ) {
 					Serial.println("Enabled@5Hz");
 				} else if (tss == TEL_ENABLED_15HZ) {
@@ -274,13 +293,14 @@ void loop() {
 
 }
 
-void sendRadioPacket(byte id, byte subID, float data1, float data2, float data3) {
+void sendRadioPacket(uint8_t id, uint8_t subID, float data1, float data2, float data3) {
 	RadioPacket tx;
 	tx.id = id;
 	tx.subID = subID;
-	tx.data1 = data1;
-	tx.data2 = data2;
-	tx.data3 = data3;
+	tx.data1 = (uint8_t)data1;
+	tx.data2 = (uint8_t)data2;
+	tx.data3 = (uint8_t)data3;
 
-	radio.send((uint8_t *)&tx, sizeof(struct RadioPacket)); //Gotta love this cursed line of C
+	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
+	radio.waitPacketSent();
 }

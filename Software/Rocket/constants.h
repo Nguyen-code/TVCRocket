@@ -19,12 +19,12 @@ PID VALUES
 */
 
 const float PID_Z_P = 1.5;
-const float PID_Z_I = 0.00;
-const float PID_Z_D = 0.2;
+const float PID_Z_I = 1;
+const float PID_Z_D = 0;
 
 const float PID_Y_P = 1.5;
-const float PID_Y_I = 0.00;
-const float PID_Y_D = 0.2;
+const float PID_Y_I = 1;
+const float PID_Y_D = 0;
 
 //WORKING
 // const float PID_Z_P = 1.5;
@@ -35,12 +35,19 @@ const float PID_Y_D = 0.2;
 // const float PID_Y_I = 0.00;
 // const float PID_Y_D = 0.2;
 
+#define GYRO_MULT 2.917
 
+#define ORI_CALC_FREQ 2000
+#define SERVO_WRITE_FREQ 250
+
+const double SERVO_WRITE_DELTA = 1.0/(double)SERVO_WRITE_FREQ;
+const double ORI_CALC_DELTA = 1.0/(double)ORI_CALC_FREQ;
 /*
 SERVO CONSTANTS
 */
-#define SERVO_MULT 5
-#define SERVO_RANGE SERVO_MULT*1.5
+#define SERVO_MULT 4
+#define SERVO_RANGE_X 4.9
+#define SERVO_RANGE_Y 8
 
 /*
 ADC RESISTOR DIVIDER CALCUALTIONS
