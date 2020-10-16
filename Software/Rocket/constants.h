@@ -45,9 +45,12 @@ const double ORI_CALC_DELTA = 1.0/(double)ORI_CALC_FREQ;
 /*
 SERVO CONSTANTS
 */
-#define SERVO_MULT 4
-#define SERVO_RANGE_X 4.9
-#define SERVO_RANGE_Y 8
+#define SERVO_MULT 1.5
+#define SERVO_RANGE_X 15
+#define SERVO_RANGE_Y 15
+
+#define SERVO_MIN_US 900
+#define SERVO_MAX_US 2100
 
 /*
 ADC RESISTOR DIVIDER CALCUALTIONS
@@ -78,7 +81,7 @@ MISC CONSTANT SETTINGS
 */
 
 const bool buzzerEnabled = false;
-const bool indicatorEnabled = false;
+const bool indicatorEnabled = true;
 
 
 #endif

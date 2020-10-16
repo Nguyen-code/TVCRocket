@@ -3,14 +3,23 @@
 #include <RH_RF95.h>
 #include "states.h"
 #include "pindefs.h"
+#include <Arduino.h>
+#include <U8g2lib.h>
 
+#ifdef U8X8_HAVE_HW_SPI
+#include <SPI.h>
+#endif
+#ifdef U8X8_HAVE_HW_I2C
+#include <Wire.h>
+#endif
 
 /*
-Screen code:
-http://www.nhdforum.newhavendisplay.com/index.php?topic=11609.0
-
-rssi change led color between green and red
+DISPLAY
 */
+
+U8G2_ST7565_NHD_C12832_F_4W_HW_SPI u8g2(U8G2_R0, /* cs=*/ 9, /* dc=*/ 5, /* reset=*/ 10);
+long lastDisplayUpdateTime = 0;
+const int displayUpdateDelay = 500;
 
 /*
 RADIO
@@ -20,9 +29,9 @@ RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 struct RadioPacket {
 	uint8_t id;
 	uint8_t subID;
-	uint8_t data1;
-	uint8_t data2;
-	uint8_t data3;
+	float data1;
+	float data2;
+	float data3;
 };
 
 /*
@@ -149,6 +158,7 @@ const int heartbeatDelay = 100;
 String serialBuffer = "";
 
 void setup() {
+
 	Serial.begin(115200);
 	//Setup pin states
 	pinMode(IND_R_PIN, OUTPUT);
@@ -156,7 +166,15 @@ void setup() {
 	pinMode(IND_B_PIN, OUTPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
 
-	analogWrite(IND_B_PIN, 127);
+	analogWrite(IND_B_PIN, 55);
+
+	int t = 1400;
+	for (int i=0; i<3; i++) {
+		tone(BUZZER_PIN, t);
+		t+=200;
+		delay(100);
+	}
+	noTone(BUZZER_PIN);
 
 	bool error = false;
 	if (!radio.init()) {
@@ -165,29 +183,95 @@ void setup() {
 	radio.setTxPower(23, false);
   	radio.setFrequency(868);
 
+  	if (!u8g2.begin()) {
+  		error = true;
+  	}
+  	u8g2.setFontMode(1);
+  	u8g2.setFlipMode(1);
+
   	if (error) {
   		analogWrite(IND_G_PIN, 0);
-  		analogWrite(IND_R_PIN, 127);
+  		analogWrite(IND_R_PIN, 55);
   		analogWrite(IND_B_PIN, 0);
   		while(1);
   	} else {
-  		analogWrite(IND_G_PIN, 127);
+  		analogWrite(IND_G_PIN, 55);
   		analogWrite(IND_R_PIN, 0);
   		analogWrite(IND_B_PIN, 0);
   	}
+  	delay(1000);
 }
+
+float packetRate;
+int rssi;
+bool confirmLaunch = false;
 
 void loop() {
 	unsigned long currentMillis = millis();
 
 	if (currentMillis - lastPacketPrint >= packetPrintDelay) {
-		float packetRate = rocketHBPacketCount/(packetPrintDelay/1000);
-		Serial.print("Rate=");
-		Serial.print(packetRate);
-		Serial.print("Hz\tRSSI=");
-		Serial.println(radio.lastRssi(), DEC);
+		packetRate = rocketHBPacketCount/(packetPrintDelay/1000);
+		rssi = (int)radio.lastRssi();
+		int rValue = map(rssi, -20, -90, 64, 0);
+		int gValue = map(rssi, -20, -90, 0, 64);
+		analogWrite(IND_G_PIN, gValue);
+		analogWrite(IND_R_PIN, rValue);
+
+		// Serial.print("Rate=");
+		// Serial.print(packetRate);
+		// Serial.print("Hz\tRSSI=");
+		// Serial.println(rssi, DEC);
+
 		rocketHBPacketCount = 0;
 		lastPacketPrint = currentMillis;
+	}
+
+	if (currentMillis - lastDisplayUpdateTime >= displayUpdateDelay) {
+		u8g2.clearBuffer();
+
+		//Write TLM rate
+		u8g2.setFont(u8g2_font_helvR08_tf);
+		u8g2.setCursor(0,8);
+    	u8g2.print("TLM Hz");
+    	u8g2.setCursor(0,32);
+    	u8g2.setFont(u8g2_font_logisoso16_tf);
+    	u8g2.print(packetRate);
+
+    	//Write rssi
+    	u8g2.setFont(u8g2_font_helvR08_tf);
+		u8g2.setCursor(40,8);
+    	u8g2.print("RSSI");
+    	u8g2.setCursor(40,32);
+    	u8g2.setFont(u8g2_font_logisoso16_tf);
+    	u8g2.print(rssi);
+
+    	//Write pyro states
+    	u8g2.setFont(u8g2_font_helvR08_tf);
+		u8g2.setCursor(70,32);
+    	u8g2.print("Cont=");
+    	u8g2.print((telem.pyro1Cont)?"T":"F");
+    	u8g2.print((telem.pyro2Cont)?"T":"F");
+    	u8g2.print((telem.pyro3Cont)?"T":"F");
+    	u8g2.print((telem.pyro4Cont)?"T":"F");
+    	u8g2.print((telem.pyro5Cont)?"T":"F");
+
+    	//Write voltage rails
+    	u8g2.setFont(u8g2_font_helvR08_tf);
+		u8g2.setCursor(70,8);
+    	u8g2.print("V=");
+    	u8g2.print(telem.battV);
+    	u8g2.print(",");
+    	u8g2.print(telem.servoV);
+
+    	//Write altitude
+    	u8g2.setFont(u8g2_font_helvR08_tf);
+		u8g2.setCursor(70,20);
+    	u8g2.print("Alt=");
+    	u8g2.print(telem.alt);
+
+    	u8g2.sendBuffer();
+
+    	lastDisplayUpdateTime = currentMillis;
 	}
 
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
@@ -223,6 +307,60 @@ void loop() {
 				sendRadioPacket(FIREPYRO, 0, 4, 1000, 0);
 			} else if (serialBuffer == "firepyro5") {
 				sendRadioPacket(FIREPYRO, 0, 5, 1000, 0);
+			} else if (serialBuffer == "launch") {
+				if (!confirmLaunch) { //Are we sure?
+					u8g2.clearBuffer();
+					u8g2.setFont(u8g2_font_logisoso22_tf);
+					u8g2.setCursor(0, 30);
+					u8g2.print("Confirm?");
+					u8g2.sendBuffer();
+					for (int i=0; i<3; i++) {
+						tone(BUZZER_PIN, 1400);
+						delay(100);
+						tone(BUZZER_PIN, 1700);
+						delay(100);
+					}
+					noTone(BUZZER_PIN);
+					delay(2000);
+					confirmLaunch = true;
+				} else { //WE ARE CONFIRMED! Go for it!
+					u8g2.clearBuffer();
+					u8g2.setFont(u8g2_font_logisoso16_tf);
+					u8g2.setCursor(0, 30);
+					u8g2.print("Confirmed :)");
+					u8g2.sendBuffer();
+					
+					delay(1000);
+					confirmLaunch = false; //reset flag
+
+					for (int i=15; i>0; i--) {
+						u8g2.clearBuffer();
+						u8g2.setCursor(55, 30);
+						u8g2.print(i);
+						u8g2.sendBuffer();
+
+						if (i > 3) {
+							tone(BUZZER_PIN, 1400);
+							delay(100);
+							noTone(BUZZER_PIN);
+							delay(900);
+						} else {
+							for (int i=0; i<2; i++) {
+								tone(BUZZER_PIN, 1400);
+								delay(100);
+								tone(BUZZER_PIN, 2000);
+								delay(100);
+							}
+							noTone(BUZZER_PIN);
+							delay(600);
+						}
+					}
+
+					sendRadioPacket(SETSTATE, 0, 2, 0, 0); //Set state to launch mode
+					delay(100);
+					sendRadioPacket(SETSTATE, 0, 2, 0, 0);
+
+				}
 			} else {
 				Serial.println("Command not understood");
 			}
@@ -241,7 +379,7 @@ void loop() {
 			Serial.print("GOT CMD: ");
 			Serial.println(rx.id);
 		}
-		switch (rx.id) {
+		switch (rx.id) { //TODO copy to the phat struct
 			case HEARTBEAT:
 				rocketHBPacketCount++;
 				break;
@@ -297,10 +435,11 @@ void sendRadioPacket(uint8_t id, uint8_t subID, float data1, float data2, float 
 	RadioPacket tx;
 	tx.id = id;
 	tx.subID = subID;
-	tx.data1 = (uint8_t)data1;
-	tx.data2 = (uint8_t)data2;
-	tx.data3 = (uint8_t)data3;
+	tx.data1 = data1;
+	tx.data2 = data2;
+	tx.data3 = data3;
 
 	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
 	radio.waitPacketSent();
+	radio.waitAvailableTimeout(1); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
 }

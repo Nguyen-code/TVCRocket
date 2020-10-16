@@ -122,9 +122,9 @@ RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 struct RadioPacket {
 	uint8_t id;
 	uint8_t subID;
-	uint8_t data1;
-	uint8_t data2;
-	uint8_t data3;
+	float data1;
+	float data2;
+	float data3;
 };
 
 /*
@@ -348,10 +348,10 @@ void setup() {
 	//Note: do not use pinMode on any of the SPI pins otherwise stuff doesn't work!
 
 	//TVC Setup
-	TVC_X_CH1.attach(TVC_X_CH1_PIN); //Attach all servos to their respective pins
-	TVC_Y_CH1.attach(TVC_Y_CH1_PIN);
-	TVC_X_CH2.attach(TVC_X_CH2_PIN);
-	TVC_Y_CH2.attach(TVC_Y_CH2_PIN);
+	TVC_X_CH1.attach(TVC_X_CH1_PIN, SERVO_MIN_US, SERVO_MAX_US); //Attach all servos to their respective pins
+	TVC_Y_CH1.attach(TVC_Y_CH1_PIN, SERVO_MIN_US, SERVO_MAX_US);
+	TVC_X_CH2.attach(TVC_X_CH2_PIN, SERVO_MIN_US, SERVO_MAX_US);
+	TVC_Y_CH2.attach(TVC_Y_CH2_PIN, SERVO_MIN_US, SERVO_MAX_US);
 
 	TVC_X_CH1.write(90+TVC_X_CH1_OFFSET); //Write all servos to center
 	TVC_Y_CH1.write(90+TVC_Y_CH1_OFFSET);
@@ -361,10 +361,12 @@ void setup() {
 	//Init serial
 	if (debug) {
 		Serial.begin(115200);
+		debugPrintln("[INIT] hello!");
 	}
 
 	//Setup rocket for initial conditions before initialization
 	configureInitialConditions(); 
+	debugPrintln("[INIT] initconfig ok");
 
 	boolean error = false;
 
@@ -647,7 +649,7 @@ void loop() {
 	HEARTBEAT
 	*/
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
-		Serial.println("[RADIO] hb");
+		debugPrintln("[RADIO] hb");
 		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
 		lastHeartbeat = currentMillis;
 	}
@@ -787,22 +789,22 @@ void loop() {
 			case SETSTATE:
 				switch ((int)rx.data1) {
 					case 0:
-						flightMode = CONN_WAIT;
+						transitionMode(CONN_WAIT);
 						break;
 					case 1:
-						flightMode = IDLE;
+						transitionMode(IDLE);
 						break;
 					case 2:
-						flightMode = LAUNCH;
+						transitionMode(LAUNCH);
 						break;
 					case 3:
-						flightMode = DESCEND;
+						transitionMode(DESCEND);
 						break;
 					case 4:
-						flightMode = COPYINGSD;
+						transitionMode(COPYINGSD);
 						break;
 					case 5:
-						flightMode = LANDED;
+						transitionMode(LANDED);
 						break;
 				}
 				break;
@@ -911,6 +913,14 @@ void transitionMode(FlightMode newMode) {
 		debugPrint("[STATE] switch to newState: ");
 		debugPrintln(newMode);
 		switch (newMode) {
+			case LAUNCH:
+				pyroState = PY_ARMED; //Arm pyro channels
+				firePyroChannel(3, 3000); //Fire pyro channel to start the motor
+				
+				//For testing only
+				firePyroChannel(4, 3000); //Fire pyro channel to start the motor
+				firePyroChannel(5, 3000); //Fire pyro channel to start the motor
+				break;
 			default:
 			break;
 		}
@@ -994,11 +1004,17 @@ void configureInitialConditions() {
 	}
 	noTone(BUZZER_PIN);
 
+	/*for(int i=0; i<15; i+=0.25) {
+		writeTVCCH1(0, i);
+		delay(1000);
+	}*/
+
 	writeTVCCH1(0, 0);
 	delay(1000);
 	writeTVCCH1(5, 5); //Up and right
 	delay(1000);
 	writeTVCCH1(0, 0);
+
 
 	delay(100);
 	transitionMode(CONN_WAIT);
@@ -1096,10 +1112,11 @@ void sendRadioPacket(uint8_t id, uint8_t subID, float data1, float data2, float 
 	RadioPacket tx;
 	tx.id = id;
 	tx.subID = subID;
-	tx.data1 = (uint8_t)data1;
-	tx.data2 = (uint8_t)data2;
-	tx.data3 = (uint8_t)data3;
+	tx.data1 = data1;
+	tx.data2 = data2;
+	tx.data3 = data3;
 
 	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
 	radio.waitPacketSent();
+	radio.waitAvailableTimeout(1); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
 }
