@@ -339,7 +339,7 @@ void loop() {
 					delay(1000);
 					confirmLaunch = false; //reset flag
 
-					for (int i=3; i>0; i--) {
+					for (int i=10; i>0; i--) {
 						u8g2.clearBuffer();
 						u8g2.setCursor(55, 30);
 						u8g2.print(i);
@@ -363,10 +363,11 @@ void loop() {
 					}
 
 					for (int i=0; i<25; i++) {
-						addRadioPacketToQueue(SETSTATE, 0, 2, 0, 0); //Set state to launch mode!
+						addRadioPacketToQueue(SETSTATE, 0, 3, 0, 0); //Set state to launch mode!
 					}
 
 				}
+
 			} else {
 				Serial.println("Command not understood");
 			}
@@ -375,9 +376,8 @@ void loop() {
 			serialBuffer += inChar;
 		}
 	}
-
-	addRadioPacketToQueue(SETSTATE, 0, 2, 0, 0); //Set state to launch mode!
-
+	addRadioPacketToQueue(SETSTATE, 0, 3, 0, 0);
+	
 	if (radioStackPos > 0) {
 		if (millis() - lastRadioSendTime > RADIO_DELAY) {
 			for (int i=1; i<radioQueueLength; i++) { //Left shift all results by 1
@@ -525,5 +525,5 @@ bool addRadioPacketToQueue(uint8_t id, uint8_t subID, float data1, float data2, 
 void sendRadioPacket(RadioPacket tx) {
 	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
 	radio.waitPacketSent();
-	radio.waitAvailableTimeout(200); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
+	radio.waitAvailableTimeout(100); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
 }

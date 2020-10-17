@@ -1044,25 +1044,19 @@ void loop() {
 				addRadioPacketToQueue(GETSTATE, 0, flightMode, pyroState, telemetryState);
 				break;
 			case SETSTATE:
-				switch ((int)rx.data1) {
-					case 0:
-						transitionMode(CONN_WAIT);
-						break;
-					case 1:
-						transitionMode(IDLE);
-						break;
-					case 2:
-						transitionMode(LAUNCH);
-						break;
-					case 3:
-						transitionMode(DESCEND);
-						break;
-					case 4:
-						transitionMode(COPYINGSD);
-						break;
-					case 5:
-						transitionMode(LANDED);
-						break;
+				if (rx.data1 == CONN_WAIT) {
+					transitionMode(CONN_WAIT);
+				} else if (rx.data1 == IDLE) {
+					transitionMode(IDLE);
+				} else if (rx.data1 == LAUNCH) {
+					Serial.println("LAUNCH INITIATED");
+					transitionMode(LAUNCH);
+				} else if (rx.data1 == DESCEND) {
+					transitionMode(DESCEND);
+				} else if (rx.data1 == COPYINGSD) {
+					transitionMode(COPYINGSD);
+				} else if (rx.data1 == LANDED) {
+					transitionMode(LANDED);
 				}
 				break;
 			case REQTELEM:
@@ -1168,57 +1162,53 @@ void transitionMode(FlightMode newMode) {
 		}
 		Serial.print("[STATE] switch to newState: ");
 		Serial.println(newMode);
-		switch (newMode) {
-			case CONN_WAIT:
-			case IDLE:
+
+		if (newMode == CONN_WAIT || newMode == IDLE) {
+			dataLoggingState = DL_DISABLED;
+			pyroState = PY_DISARMED;
+		} else if (newMode == LAUNCH) {
+			Serial.println("LAUNCH INITIATED");
+			//Reset integrator values
+			zAxis.resetIntegrator();
+			yAxis.resetIntegrator();
+
+			//Reset orientation
+			ori.reset();
+
+			//Set flight started time
+			flightStartTime = millis();
+
+			//Enable TVC
+			tvcEnabled = TVC_ENABLED;
+
+			//Enable datalogging
+			dataLoggingState = DL_ENABLED_40HZ;
+
+			//Light this candle!
+			pyroState = PY_ARMED; //Arm pyro channels
+			firePyroChannel(3, 3000); //Fire pyro channel to start the motor
+		} else if (newMode == DESCEND) {
+			//Disable TVC
+			tvcEnabled = TVC_DISABLED;
+
+			//Set lastNotLandedTime
+			lastNotLandedTime = millis();
+
+			//Ensure chutes armed
+			pyroState = PY_ARMED;
+			firePyroChannel(4, 3000); //Fire parachute channel 1
+			delay(1000);
+			firePyroChannel(5, 3000); //Fire parachute channel 2
+		} else if (newMode == COPYINGSD) {
+			//Disable pyros
+			pyroState = PY_DISARMED;
+
+			if (dataLoggingState == DL_DISABLED) { //if we're disabled just go landed
+				transitionMode(LANDED);
+			} else {
+				//Disable datalogging
 				dataLoggingState = DL_DISABLED;
-				pyroState = PY_DISARMED;
-				break;
-			case LAUNCH:
-				//Reset integrator values
-				zAxis.resetIntegrator();
-				yAxis.resetIntegrator();
-
-				//Reset orientation
-				ori.reset();
-
-				//Set flight started time
-				flightStartTime = millis();
-
-				//Enable TVC
-				tvcEnabled = TVC_ENABLED;
-
-				//Enable datalogging
-				dataLoggingState = DL_ENABLED_40HZ;
-
-				//Light this candle!
-				pyroState = PY_ARMED; //Arm pyro channels
-				firePyroChannel(3, 3000); //Fire pyro channel to start the motor
-				break;
-			case DESCEND:
-				//Disable TVC
-				tvcEnabled = TVC_DISABLED;
-
-				//Set lastNotLandedTime
-				lastNotLandedTime = millis();
-
-				//Ensure chutes armed
-				pyroState = PY_ARMED;
-				firePyroChannel(4, 3000); //Fire parachute channel 1
-				delay(1000);
-				firePyroChannel(5, 3000); //Fire parachute channel 2
-				break;
-			case COPYINGSD:
-				//Disable pyros
-				pyroState = PY_DISARMED;
-
-				if (dataLoggingState == DL_DISABLED) { //if we're disabled just go landed
-					transitionMode(LANDED);
-				} else {
-					//Disable datalogging
-					dataLoggingState = DL_DISABLED;
-				}
-				break;
+			}
 		}
 	}
 }
