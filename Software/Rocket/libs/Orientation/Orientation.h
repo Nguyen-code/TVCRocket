@@ -23,8 +23,8 @@ public:
     Completely reset stored quaternion, returning to initial conditions (1, 0, 0, 0)
     DO NOT USE IN FLIGHT FOR THE LOVE OF GOD
     */
-    void zero() { orientation.a = 1; orientation.b = 0; orientation.c = 0; orientation.d = 0; };
-    void reset() { this->zero(); };
+    void zero();
+    void reset();
 
     /*
     IMPORTANT NOTES FOR UPDATE FUNCTION:

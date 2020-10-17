@@ -61,3 +61,11 @@ void Orientation::zeroRoll()
     EulerAngles angleRep = this->toEuler();
     orientation = Quaternion::from_euler_rotation(angleRep.yaw, angleRep.pitch, 0);
 }
+
+void Orientation::zero() {
+    orientation = Quaternion();
+}
+
+void Orientation::reset() {
+    orientation = Quaternion();
+};

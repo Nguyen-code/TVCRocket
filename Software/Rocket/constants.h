@@ -49,8 +49,20 @@ SERVO CONSTANTS
 #define SERVO_RANGE_X 15
 #define SERVO_RANGE_Y 15
 
-#define SERVO_MIN_US 900
-#define SERVO_MAX_US 2100
+#define SERVO_MIN_US 900 //us`
+#define SERVO_MAX_US 2100 //us
+
+/*
+RADIO CONSTANTS
+*/
+#define RADIO_DELAY 75 //ms
+
+/*
+BAROMETER CONSTANTS
+*/
+#define BARO_CALC_FREQ 100
+
+const double BARO_CALC_DELTA = 1.0/(double)BARO_CALC_FREQ;
 
 /*
 ADC RESISTOR DIVIDER CALCUALTIONS
@@ -74,7 +86,7 @@ const double ADC_RES_DIV_FACTOR_PYRO = (double)ADC_PYRO_DIVD_RES2/((double)ADC_P
 const double ADC_MAX_V = 4.096;
 const double ADC_DIV_FACTOR_V = ADC_MAX_V/2047; //11 bit mantissa
 
-const float ADC_PYRO_THRESH_CONT = 10.9; //voltage drop in v for cont
+const float ADC_PYRO_THRESH_CONT = 11.5; //voltage drop in v for cont
 
 /*
 MISC CONSTANT SETTINGS
@@ -82,6 +94,28 @@ MISC CONSTANT SETTINGS
 
 const bool buzzerEnabled = false;
 const bool indicatorEnabled = true;
+
+/*
+FLIGHT TRANSITION CONSTANTS
+*/
+
+//Parachute deployment stuff
+#define flight_minTimeBeforeApogee 2500
+#define flight_altSlopeApogeeCutoff 2
+
+#define flight_timeBeforeForceChutesDeploy 7000
+
+#define flight_minTimeBeforeAbort 1500
+#define flight_abortDegrees 30
+
+#define flight_timeBeforeForceSDCopy 45000
+#define flight_altSlopeLandedCutoff 1.5
+#define flight_minLandedTime 1250
+
+
+/*
+DATALOGGING CONSTANTS
+*/
 
 
 #endif

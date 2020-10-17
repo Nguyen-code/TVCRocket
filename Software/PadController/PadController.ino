@@ -34,6 +34,12 @@ struct RadioPacket {
 	float data3;
 };
 
+const byte radioQueueLength = 25;
+RadioPacket radioPacketQueue[radioQueueLength];
+unsigned long lastRadioSendTime = 0;
+byte radioStackPos = 0;
+#define RADIO_DELAY 100
+
 /*
 Radio Command List
 0: Ping/pong check (heartbeat)
@@ -212,8 +218,8 @@ void loop() {
 	if (currentMillis - lastPacketPrint >= packetPrintDelay) {
 		packetRate = rocketHBPacketCount/(packetPrintDelay/1000);
 		rssi = (int)radio.lastRssi();
-		int rValue = map(rssi, -20, -90, 64, 0);
-		int gValue = map(rssi, -20, -90, 0, 64);
+		int rValue = map(packetRate, 0, 5, 64, 0);
+		int gValue = map(packetRate, 0, 5, 0, 64);
 		analogWrite(IND_G_PIN, gValue);
 		analogWrite(IND_R_PIN, rValue);
 
@@ -275,7 +281,7 @@ void loop() {
 	}
 
 	if (currentMillis - lastHeartbeat > heartbeatDelay) {
-		sendRadioPacket(HEARTBEAT, 0, 0, 0, 0);
+		addRadioPacketToQueue(HEARTBEAT, 0, 0, 0, 0);
 		lastHeartbeat = currentMillis;
 	}
 
@@ -288,25 +294,25 @@ void loop() {
 			Serial.print("Got command: ");
 			Serial.println(serialBuffer);
 			if (serialBuffer == "getstate") {
-				sendRadioPacket(GETSTATE, 0, 0, 0, 0);
+				addRadioPacketToQueue(GETSTATE, 0, 0, 0, 0);
 			} else if (serialBuffer == "pyroarm") {
-				sendRadioPacket(PYROARMING, 0, 1, 0, 0);
+				addRadioPacketToQueue(PYROARMING, 0, 1, 0, 0);
 			} else if (serialBuffer == "pyrodisarm") {
-				sendRadioPacket(PYROARMING, 0, 0, 0, 0);
+				addRadioPacketToQueue(PYROARMING, 0, 0, 0, 0);
 			} else if (serialBuffer == "stateidle") {
-				sendRadioPacket(SETSTATE, 0, 1, 0, 0);
+				addRadioPacketToQueue(SETSTATE, 0, 1, 0, 0);
 			} else if (serialBuffer == "statelaunch") {
-				sendRadioPacket(SETSTATE, 0, 2, 0, 0);
+				addRadioPacketToQueue(SETSTATE, 0, 2, 0, 0);
 			} else if (serialBuffer == "firepyro1") {
-				sendRadioPacket(FIREPYRO, 0, 1, 1000, 0);
+				addRadioPacketToQueue(FIREPYRO, 0, 1, 1000, 0);
 			} else if (serialBuffer == "firepyro2") {
-				sendRadioPacket(FIREPYRO, 0, 2, 1000, 0);
+				addRadioPacketToQueue(FIREPYRO, 0, 2, 1000, 0);
 			} else if (serialBuffer == "firepyro3") {
-				sendRadioPacket(FIREPYRO, 0, 3, 1000, 0);
+				addRadioPacketToQueue(FIREPYRO, 0, 3, 1000, 0);
 			} else if (serialBuffer == "firepyro4") {
-				sendRadioPacket(FIREPYRO, 0, 4, 1000, 0);
+				addRadioPacketToQueue(FIREPYRO, 0, 4, 1000, 0);
 			} else if (serialBuffer == "firepyro5") {
-				sendRadioPacket(FIREPYRO, 0, 5, 1000, 0);
+				addRadioPacketToQueue(FIREPYRO, 0, 5, 1000, 0);
 			} else if (serialBuffer == "launch") {
 				if (!confirmLaunch) { //Are we sure?
 					u8g2.clearBuffer();
@@ -333,7 +339,7 @@ void loop() {
 					delay(1000);
 					confirmLaunch = false; //reset flag
 
-					for (int i=15; i>0; i--) {
+					for (int i=3; i>0; i--) {
 						u8g2.clearBuffer();
 						u8g2.setCursor(55, 30);
 						u8g2.print(i);
@@ -356,9 +362,9 @@ void loop() {
 						}
 					}
 
-					sendRadioPacket(SETSTATE, 0, 2, 0, 0); //Set state to launch mode
-					delay(100);
-					sendRadioPacket(SETSTATE, 0, 2, 0, 0);
+					for (int i=0; i<25; i++) {
+						addRadioPacketToQueue(SETSTATE, 0, 2, 0, 0); //Set state to launch mode!
+					}
 
 				}
 			} else {
@@ -370,6 +376,20 @@ void loop() {
 		}
 	}
 
+	addRadioPacketToQueue(SETSTATE, 0, 2, 0, 0); //Set state to launch mode!
+
+	if (radioStackPos > 0) {
+		if (millis() - lastRadioSendTime > RADIO_DELAY) {
+			for (int i=1; i<radioQueueLength; i++) { //Left shift all results by 1
+				radioPacketQueue[i-1] = radioPacketQueue[i];
+			}
+			radioStackPos--; //we've removed one from the stack
+			if (radioStackPos > 0) { //is there something new to send?
+				sendRadioPacket(radioPacketQueue[0]);
+				lastRadioSendTime = millis();
+			}
+		}
+	}
 	if (radio.available()) {
 		RadioPacket rx;
 		uint8_t datalen = sizeof(rx);
@@ -384,6 +404,57 @@ void loop() {
 				rocketHBPacketCount++;
 				break;
 			case GETTELEM:
+			/*
+			//PACKET QUEUE IDs
+			addRadioPacketToQueue(GETTELEM, 0, telem.timeSinceStartup, telem.missionElapsedTime, telem.guidanceFrequency);
+			addRadioPacketToQueue(GETTELEM, 1, telem.fMode, telem.pState, telem.cState);
+			addRadioPacketToQueue(GETTELEM, 2, telem.dState, telem.tSState, telem.tCState);
+			addRadioPacketToQueue(GETTELEM, 3, telem.battV, telem.servoV, telem.rollMotorV);
+			addRadioPacketToQueue(GETTELEM, 4, telem.boardTemp, telem.gpsFix, telem.gpsSats);
+
+			addRadioPacketToQueue(GETTELEM, 5, telem.gyroX, telem.gyroY, telem.gyroZ);
+			addRadioPacketToQueue(GETTELEM, 6, telem.accX, telem.accY, telem.accZ);
+			addRadioPacketToQueue(GETTELEM, 7, telem.magX, telem.magY, telem.magZ);
+			addRadioPacketToQueue(GETTELEM, 8, telem.GNSSLat, telem.GNSSLon, telem.alt);
+
+			addRadioPacketToQueue(GETTELEM, 9, telem.oriX, telem.oriY, telem.oriZ);
+			addRadioPacketToQueue(GETTELEM, 10, telem.posX, telem.posY, telem.posZ);
+			addRadioPacketToQueue(GETTELEM, 11, telem.velX, telem.velY, telem.velZ);
+
+			addRadioPacketToQueue(GETTELEM, 12, telem.pyro1Cont, telem.pyro2Cont, telem.pyro3Cont);
+			addRadioPacketToQueue(GETTELEM, 13, telem.pyro4Cont, telem.pyro5Cont, 0);
+
+			addRadioPacketToQueue(GETTELEM, 14, telem.pyro1Fire, telem.pyro2Fire, telem.pyro3Fire);
+			addRadioPacketToQueue(GETTELEM, 15, telem.pyro4Fire, telem.pyro5Fire, 0);
+
+			addRadioPacketToQueue(GETTELEM, 16, telem.tvcX, telem.tvcY, 0);
+			*/
+				switch (rx.subID) {
+					case 1:
+						telem.fMode = (FlightMode)rx.data1;
+						telem.pState = (PyroStates)rx.data2;
+						telem.cState = (ChuteStates)rx.data3;
+						break;
+					case 3:
+						telem.battV = rx.data1;
+						telem.servoV = rx.data2;
+						telem.rollMotorV = rx.data3;
+						break;
+					case 9:
+						telem.oriX = rx.data1;
+						telem.oriY = rx.data2;
+						telem.oriZ = rx.data3;
+						break;
+					case 12:
+						telem.pyro1Cont = (rx.data1 == 1.0) ? true : false;
+						telem.pyro2Cont = (rx.data2 == 1.0) ? true : false;
+						telem.pyro3Cont = (rx.data3 == 1.0) ? true : false;
+						break;
+					case 13:
+						telem.pyro4Cont = (rx.data1 == 1.0) ? true : false;
+						telem.pyro5Cont = (rx.data2 == 1.0) ? true : false;
+						break;
+				}
 				break;
 			case GETSTATE:
 				Serial.println("Current rocket internal state:");
@@ -431,15 +502,28 @@ void loop() {
 
 }
 
-void sendRadioPacket(uint8_t id, uint8_t subID, float data1, float data2, float data3) {
-	RadioPacket tx;
-	tx.id = id;
-	tx.subID = subID;
-	tx.data1 = data1;
-	tx.data2 = data2;
-	tx.data3 = data3;
 
+bool addRadioPacketToQueue(uint8_t id, uint8_t subID, float data1, float data2, float data3) {
+	if (radioStackPos < radioQueueLength && id >= 0 && subID >= 0) {
+		//Override packet in place w/ radio ID
+		radioPacketQueue[radioStackPos].id = id;
+		radioPacketQueue[radioStackPos].subID = subID;
+		radioPacketQueue[radioStackPos].data1 = data1;
+		radioPacketQueue[radioStackPos].data2 = data2;
+		radioPacketQueue[radioStackPos].data3 = data3;
+
+		radioStackPos++; //go up 1 stackpos
+		if (radioStackPos == 1) {
+			sendRadioPacket(radioPacketQueue[0]); //if it's the 1st one, send it
+			lastRadioSendTime = millis();
+		}
+		return true;
+	}
+	return false;
+}
+
+void sendRadioPacket(RadioPacket tx) {
 	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
 	radio.waitPacketSent();
-	radio.waitAvailableTimeout(1); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
+	radio.waitAvailableTimeout(200); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
 }

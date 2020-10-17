@@ -17,3 +17,7 @@ double PID::update(double input, double dt)
 double PID::getLast() {
 	return lastOutput;
 }
+
+void PID::resetIntegrator() {
+	integral = 0; //reset it!
+}

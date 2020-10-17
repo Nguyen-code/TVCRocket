@@ -16,6 +16,7 @@ public:
 
     double update(double input, double dt); // Updates PID maths and returns new output
     double getLast(); //Gets last PID value
+    void resetIntegrator(); //resets integrator value
 private:
     double prevError = 0;
 };
