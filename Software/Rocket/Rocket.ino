@@ -758,6 +758,7 @@ void loop() {
 	*/
 	double dtTVC = (double)(micros()-lastTVCMicros) / 1000000.0;
 	if (dtTVC > SERVO_WRITE_DELTA && tvcEnabled == TVC_ENABLED) {
+		Serial.println("TVCWRITE");
 		float zAng = zAxis.getLast();
 		float yAng = yAxis.getLast();
 
@@ -1186,7 +1187,7 @@ void transitionMode(FlightMode newMode) {
 
 			//Light this candle!
 			pyroState = PY_ARMED; //Arm pyro channels
-			firePyroChannel(3, 3000); //Fire pyro channel to start the motor
+			firePyroChannel(2, 3000); //Fire pyro channel to start the motor
 		} else if (newMode == DESCEND) {
 			//Disable TVC
 			tvcEnabled = TVC_DISABLED;
@@ -1197,7 +1198,7 @@ void transitionMode(FlightMode newMode) {
 			//Ensure chutes armed
 			pyroState = PY_ARMED;
 			firePyroChannel(4, 3000); //Fire parachute channel 1
-			delay(1000);
+			delay(2000);
 			firePyroChannel(5, 3000); //Fire parachute channel 2
 		} else if (newMode == COPYINGSD) {
 			//Disable pyros
@@ -1277,6 +1278,7 @@ void configureInitialConditions() {
 	dataLoggingState = DL_ENABLED_40HZ;
 	telemetryState = TEL_ENABLED_1HZ;
 	telemetryConnectionState = TEL_DISCONNECTED;
+	tvcEnabled = TVC_DISABLED;
 
 	analogWrite(IND_B_PIN, 127);
 	analogWrite(IND_G_PIN, 0);
@@ -1294,12 +1296,13 @@ void configureInitialConditions() {
 		writeTVCCH1(0, i);
 		delay(1000);
 	}*/
-
+	tvcEnabled = TVC_ENABLED;
 	writeTVCCH1(0, 0);
 	delay(1000);
 	writeTVCCH1(5, 5); //Up and right
 	delay(1000);
 	writeTVCCH1(0, 0);
+	tvcEnabled = TVC_DISABLED;
 
 
 	delay(100);
@@ -1380,7 +1383,6 @@ bool firePyroChannel(byte nChannel, int time) { //We don't really care about con
 }
 
 void writeTVCCH1(float x, float y) {
-	return;
 	if (tvcEnabled == TVC_ENABLED) {
 		x = constrain(x, -SERVO_RANGE_X, SERVO_RANGE_X);
 		y = constrain(y, -SERVO_RANGE_Y, SERVO_RANGE_Y);

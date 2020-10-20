@@ -212,6 +212,9 @@ float packetRate;
 int rssi;
 bool confirmLaunch = false;
 
+bool sendLaunch = false;
+unsigned long launchStartTime = 0;
+
 void loop() {
 	unsigned long currentMillis = millis();
 
@@ -223,10 +226,10 @@ void loop() {
 		analogWrite(IND_G_PIN, gValue);
 		analogWrite(IND_R_PIN, rValue);
 
-		// Serial.print("Rate=");
-		// Serial.print(packetRate);
-		// Serial.print("Hz\tRSSI=");
-		// Serial.println(rssi, DEC);
+		Serial.print("Rate=");
+		Serial.print(packetRate);
+		Serial.print("Hz\tRSSI=");
+		Serial.println(rssi, DEC);
 
 		rocketHBPacketCount = 0;
 		lastPacketPrint = currentMillis;
@@ -362,9 +365,8 @@ void loop() {
 						}
 					}
 
-					for (int i=0; i<25; i++) {
-						addRadioPacketToQueue(SETSTATE, 0, 3, 0, 0); //Set state to launch mode!
-					}
+					sendLaunch = true;
+					launchStartTime = millis();
 
 				}
 
@@ -376,8 +378,18 @@ void loop() {
 			serialBuffer += inChar;
 		}
 	}
-	addRadioPacketToQueue(SETSTATE, 0, 3, 0, 0);
-	
+
+	if (sendLaunch) {
+		delay(200);
+		RadioPacket launchPacket;
+		launchPacket.id = SETSTATE;
+		launchPacket.data1 = 3;
+		sendRadioPacket(launchPacket);
+		if (millis() - launchStartTime > 5000) {
+			sendLaunch = false;
+		}
+	}
+
 	if (radioStackPos > 0) {
 		if (millis() - lastRadioSendTime > RADIO_DELAY) {
 			for (int i=1; i<radioQueueLength; i++) { //Left shift all results by 1
@@ -395,10 +407,10 @@ void loop() {
 		uint8_t datalen = sizeof(rx);
 		radio.recv((uint8_t*)&rx, &datalen);
 
-		if (rx.id != 3 || true) {
-			Serial.print("GOT CMD: ");
-			Serial.println(rx.id);
-		}
+		// if (rx.id != 3) {
+		// 	Serial.print("GOT CMD: ");
+		// 	Serial.println(rx.id);
+		// }
 		switch (rx.id) { //TODO copy to the phat struct
 			case HEARTBEAT:
 				rocketHBPacketCount++;

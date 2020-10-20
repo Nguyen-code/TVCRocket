@@ -18,13 +18,13 @@ TVC OFFSETS
 PID VALUES
 */
 
-const float PID_Z_P = 1.5;
-const float PID_Z_I = 1;
-const float PID_Z_D = 0;
+const float PID_Z_P = 2;
+const float PID_Z_I = 2;
+const float PID_Z_D = 0.07;
 
-const float PID_Y_P = 1.5;
-const float PID_Y_I = 1;
-const float PID_Y_D = 0;
+const float PID_Y_P = 2;
+const float PID_Y_I = 2;
+const float PID_Y_D = 0.07;
 
 //WORKING
 // const float PID_Z_P = 1.5;
@@ -45,9 +45,9 @@ const double ORI_CALC_DELTA = 1.0/(double)ORI_CALC_FREQ;
 /*
 SERVO CONSTANTS
 */
-#define SERVO_MULT 1.5
-#define SERVO_RANGE_X 15
-#define SERVO_RANGE_Y 15
+#define SERVO_MULT 4
+#define SERVO_RANGE_X 10
+#define SERVO_RANGE_Y 10
 
 #define SERVO_MIN_US 900 //us`
 #define SERVO_MAX_US 2100 //us
@@ -100,12 +100,12 @@ FLIGHT TRANSITION CONSTANTS
 */
 
 //Parachute deployment stuff
-#define flight_minTimeBeforeApogee 2500
+#define flight_minTimeBeforeApogee 5500
 #define flight_altSlopeApogeeCutoff 2
 
 #define flight_timeBeforeForceChutesDeploy 7000
 
-#define flight_minTimeBeforeAbort 1500
+#define flight_minTimeBeforeAbort 4000
 #define flight_abortDegrees 30
 
 #define flight_timeBeforeForceSDCopy 45000
