@@ -8,9 +8,6 @@
 // Tested with Anarduino MiniWirelessLoRa, Rocket Scream Mini Ultra Pro with
 // the RFM95W, Adafruit Feather M0 with RFM95
 
-#include <SPI.h>
-#include <RH_RF95.h>
-
 // Singleton instance of the radio driver
 RH_RF95 rf95(31, 32);
 //RH_RF95 rf95(5, 2); // Rocket Scream Mini Ultra Pro with the RFM95W
@@ -464,76 +461,3 @@ void loop(void) {
   draw_m0_h_with_extra_blank(); // fontmode 1, h font with extra blank --> correct
   delay(1000);  
 }
-
-
-
-
-
-
-#include <Servo.h> 
- 
-Servo t1;  // create servo object to control a servo 
-Servo t2;
-                // a maximum of eight servo objects can be created 
- 
-int pos = 0;    // variable to store the servo position 
-const int xCenter = 0;
-const int yCenter = 0;
-
-const int delta = 40;
- 
-void setup() 
-{ 
-  t1.attach(22, 900, 2100);  // attaches the servo on pin 20 
-  t2.attach(23, 900, 2100);
-
-  t1.write(xCenter);
-  t2.write(yCenter);
-
-  delay(5000);
-} 
- 
-boolean l = 1;
-void loop() 
-{ 
-  int center = (l?xCenter:yCenter);
-  for(pos = center; pos < center+delta; pos += 1)  // goes from 10 degrees to 170 degrees 
-  {                                  // in steps of 1 degree 
-    if (l) {
-      t1.write(pos);              // tell servo to go to position in variable 'pos' 
-    } else {
-      t2.write(pos);
-    }
-    
-    delay(7);                       // waits 15ms for the servo to reach the position 
-  } 
-  for(pos = center+delta; pos>=center-delta; pos-=1)     // goes from 180 degrees to 0 degrees 
-  {                                
-    if (l) {
-      t1.write(pos);              // tell servo to go to position in variable 'pos' 
-    } else {
-      t2.write(pos);
-    }           // tell servo to go to position in variable 'pos' 
-    //t2.write(180-pos);
-    delay(7);                       // waits 15ms for the servo to reach the position 
-  } 
-  for(pos = center-delta; pos<center; pos+=1)     // goes from 180 degrees to 0 degrees 
-  {                                
-    if (l) {
-      t1.write(pos);              // tell servo to go to position in variable 'pos' 
-    } else {
-      t2.write(pos);
-    }           // tell servo to go to position in variable 'pos' 
-    //t2.write(180-pos);
-    delay(7);                       // waits 15ms for the servo to reach the position 
-  } 
-
-  l = !l;
-  if (l) {
-    t2.write(yCenter);
-  } else {
-    t1.write(xCenter);
-  }
-  delay(100);
-} 
-
