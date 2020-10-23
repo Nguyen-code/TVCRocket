@@ -17,6 +17,20 @@ https://github.com/rsasaki0109/kalman_filter_localization/blob/master/include/ka
 EKF but for drones
 https://github.com/PX4/ecl
 
+Apparently good theory
+https://www.kalmanfilter.net/kalman1d.html
+
+More notes and papers
+https://www.researchgate.net/publication/260725857_Vehicle_speed_estimation_using_GPSRISS_Reduced_Inertial_Sensor_System
+https://www.bzarg.com/p/how-a-kalman-filter-works-in-pictures/
+https://www.mathworks.com/matlabcentral/fileexchange/56652-particle-sigma-point-and-kalman-filters
+http://www.anuncommonlab.com/articles/how-kalman-filters-work/
+
+Embedded lib w some great info at the top
+https://github.com/pronenewbits/Embedded_EKF_Library/blob/master/ekf_engl/ekf.cpp
+https://github.com/pronenewbits/Arduino_AHRS_System/blob/master/ahrs_ekf/ahrs_ekf.ino
+https://github.com/pronenewbits/Arduino_AHRS_System/blob/master/ahrs_ekf/ekf.cpp
+
 State is represented by a matrix x
 Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
 
