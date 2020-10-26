@@ -17,13 +17,13 @@ Rocket at launch site in tuning setup
 
 #### Zenith
 
-![Zenith Top](/Pictures/zenithTop.jpg)
-![Zenith Bottom](/Pictures/zenithBottom.jpg)
+![Zenith Top](/Pictures/zenithTop.png)
+![Zenith Bottom](/Pictures/zenithBottom.png)
 
 #### Controller
 
-![Zenith Controller Top](/Pictures/controllerTop.jpg)
-![Zenith Conrtoller Bottom](/Pictures/controllerBottom.jpg)
+![Zenith Controller Top](/Pictures/controllerTop.png)
+![Zenith Conrtoller Bottom](/Pictures/controllerBottom.png)
 
 # Design Intent
 
