@@ -1,6 +1,6 @@
 # About TVCRocket
 
-This project was simultaneously one of the most challenging and most fun project I've done in a while. I put myself on an extremely strict deadline, only 6 weeks (because I wanted to submit some of the work to colleges for applications) and I'm pleased with the progress I was able to make in that time. Going forward, I'm excited to continue development in future versions.
+This project was simultaneously one of the most challenging and most fun projects I've done in a while. I put myself on an extremely strict deadline, only 6 weeks for everything from planning launch sites to putting together 3 rockets (because I wanted to submit some of the work to colleges for applications) and I'm pleased with the progress I was able to make in that time. Going forward, I'm excited to continue development in future versions.
 
 # Design Intent
 
@@ -8,23 +8,23 @@ The overarching goal of this project was to design and develop an active stabili
 
 # Pictures!
 
-Zenith Boards (both controller and flight computer)
+### Zenith Boards (both controller and flight computer)
 ![Zenith Boards Finalized](/Pictures/zenithAssembled.jpg)
 
-Rockets before launch
+### Rockets before launch
 ![Before Launch](/Pictures/rocketsBLaunch.jpeg)
 
-Rocket at launch site in tuning setup
+### Rocket at launch site in tuning setup
 ![At Launch](/Pictures/rocketALaunch.jpg)
 
-### Renderings
+# Renderings
 
-#### Zenith
+## Zenith
 
 ![Zenith Top](/Pictures/zenithTop.png)
 ![Zenith Bottom](/Pictures/zenithBottom.png)
 
-#### Controller
+## Controller
 
 ![Zenith Controller Top](/Pictures/controllerTop.png)
 ![Zenith Conrtoller Bottom](/Pictures/controllerBottom.png)
