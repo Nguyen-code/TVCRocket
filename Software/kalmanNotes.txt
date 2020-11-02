@@ -33,6 +33,8 @@ https://github.com/pronenewbits/Arduino_AHRS_System/blob/master/ahrs_ekf/ekf.cpp
 
 ACTUAL KALMAN FILTER IMPLEMENTATION FOR ARDUINO (USE THIS)
 https://github.com/DanInvents/Flight-Controller
+and
+https://github.com/TKJElectronics/KalmanFilter/blob/master/examples/MPU6050/MPU6050.ino
 
 State is represented by a matrix x
 Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
