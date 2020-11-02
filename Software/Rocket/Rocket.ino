@@ -871,7 +871,7 @@ void loop() {
 			telem.alt = currentAlt;
 
 			flash.writeAnything(currentFlashAddr, telem);
-			currentFlashAddr+=sizeof(TELEMETRY);;
+			currentFlashAddr+=sizeof(TELEMETRY);
 		}
 	}
 
