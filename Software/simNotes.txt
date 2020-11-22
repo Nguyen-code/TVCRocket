@@ -1,0 +1,5 @@
+Sim notes:
+For making my own sim:
+http://www.braeunig.us/space/aerodyn_wip.htm
+
+Use basic_1.mat and slx to sim in simulink

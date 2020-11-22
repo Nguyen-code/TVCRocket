@@ -39,6 +39,9 @@ https://github.com/TKJElectronics/KalmanFilter/blob/master/examples/MPU6050/MPU6
 more general sim ref stuff
 https://github.com/Zentrik/TVC
 
+BEST RESOURCE
+https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python
+
 State is represented by a matrix x
 Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
 

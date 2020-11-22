@@ -1,0 +1,64 @@
+void loop() {
+  currentTime = millis();
+  dt = ((currentTime - prevTime) / 1000.0 );
+
+  // Puts gyro data into data[2], data[4], data[5]
+  readBMI();
+
+  if(firstPass == false) {
+
+    omega[0] = (data[3]);
+    omega[1] = (data[4]);
+    omega[2] = (data[5]);
+
+
+    wLength = sqrt(sq(omega[0]) + sq(omega[1]) + sq(omega[2]));
+
+    theta = wLength * dt;
+    q_new[0] = cos(theta/2);
+    q_new[1] = -(omega[0] / wLength * sin(theta / 2));
+    q_new[2] = -(omega[1] / wLength * sin(theta / 2));
+    q_new[3] = -(omega[2] / wLength * sin(theta / 2));
+
+    q[0] = q_body[0];
+    q[1] = q_body[1];
+    q[2] = q_body[2];
+    q[3] = q_body[3];
+
+    q_body[0] = q_new[0] * q[0] - q_new[1] * q[1] - q_new[2] * q[2] - q_new[3] * q[3];
+    q_body[1] = q_new[0] * q[1] + q_new[1] * q[0] + q_new[2] * q[3] - q_new[3] * q[2];
+    q_body[2] = q_new[0] * q[2] - q_new[1] * q[3] + q_new[2] * q[0] + q_new[3] * q[1];
+    q_body[3] = q_new[0] * q[3] + q_new[1] * q[2] - q_new[2] * q[1] + q_new[3] * q[0];
+    
+    double sinr_cosp = 2 * (q_body[0] * q_body[1] + q_body[2] * q_body[3]);
+    double cosr_cosp = 1 - 2 * (q_body[1] * q_body[1] + q_body[2] * q_body[2]);
+    roll = atan2(sinr_cosp, cosr_cosp) * RAD_TO_DEG;
+
+    double sinp = 2 * (q_body[0] * q_body[2] - q_body[1] * q_body[3]);
+    if(sinp >= 1) pitch = 90;
+    else if(sinp <= -1) pitch = -90;
+    else pitch = asin(sinp) * RAD_TO_DEG;
+
+    double siny_cosp = 2 * (q_body[0] * q_body[3] + q_body[1] * q_body[2]);
+    double cosy_cosp = 1 - 2 * (q_body[2] * q_body[2] + q_body[3] * q_body[3]);
+    yaw = atan2(siny_cosp, cosy_cosp) * RAD_TO_DEG;
+
+  }
+
+  Serial.print(roll);
+  Serial.print(" ");
+  Serial.print(pitch);
+  Serial.print(" ");
+  Serial.print(yaw);
+  Serial.print(" ");
+  Serial.println();
+
+  servo_x_val = mapFloats(pitch, -45,45,servo_x_min, servo_x_max);
+  xServo.write(servo_x_val);
+  servo_y_val = mapFloats(yaw, -45,45,servo_y_min, servo_y_max);
+  yServo.write(servo_y_val);
+
+  delay(20);
+  firstPass = false;
+  prevTime = currentTime;
+}
