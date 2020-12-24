@@ -42,6 +42,12 @@ https://github.com/Zentrik/TVC
 BEST RESOURCE
 https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python
 
+Notes on Torque based controllers
+https://youtu.be/J2ACQsmkPJs?t=411
+
+Quaternion stuff
+https://github.com/alexdada555/Rocket-Landing-Control/blob/master/ACS6116%20Assignment%20-%20Rocket%20Landing%20Control%20With%20MPC.pdf
+
 State is represented by a matrix x
 Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
 
