@@ -55,7 +55,68 @@ ori stuff
 4) launch go gyro only
 Also use interrupts for sensor
 
-make constant for servo angle to tvc mount angle
+make constant for servo angle to tvc mount angle\
+
+Everything that joe is logging:
+ones that make sense:
+- avi voltage
+- data error flag
+- nav error flag
+- abort state flag
+- py 1-5 continuity
+- py 1-5 fire
+- vehicle mass (lin approx)
+- baro alt (long avg)
+- tvc y, z error
+- Leg deployment
+- landing abort status
+- Ejection progress (multi step)
+- ejection success
+- fin deployment state
+- bleed-off percent
+- divert altitude error
+- divert altitude height
+- max height
+- target burn alt
+- GNSS y, x vel
+- Acc z, y
+- gyro x, y, z
+- predicted ori for landing z, y
+- fused ori x, y, z
+- ori setpoints
+- roll wheel setpoint
+- tvc torque z, y
+- gnss pdop
+- gnss fix type (3d, etc)
+- gnss sat count (SIV)
+- raw pressure
+- fused pos x, y, z
+- fused vel x, y, z
+- active accel biasing x, y, z
+- velocity bias? x, y, z
+- ori bias? x, y, z
+- tvc setpoint y, z
+- board temp
+- system state
+- flight time
+- gain set 1-5: different guidance modes (trying to control position when rising, velocity at the very end)
+
+ones that I'm not sure what they are:
+- gyro_yi seems to be a backup gyroscope possibly
+- difference between gyro_yi_sp, gyro_yi_s, gyro_yb_sp_s (sp = setpoint?)
+1hz outside of flight, 50hz in flight
+
+i = intertial frame (global, up and down is relative to gravity)
+b = body frame (body, relative to vehicle)
+move from inertial to body to remove effect of roll
+
+Cool things joey b does:
+use torque based controller w/  mass, mass moment of inertia, COM to come up with a more accurate TVC scheme
+use max alt and simulated motor ignition to come up with burn altitude for landing (monte carlo sim in lookup table probably)
+use more simulation to know where the vehicle "should be" based on Cd after landing ignition, calculate divert altitude to start divert movement
+use divert altitude error (error from the vehicle's should be calculation to where it actually is) to come up with bleed percent (peak amplitude of sin wave divert)
+can calculate bleed percent with 100-motorthrust*cos(mountangle) = bleed percent
+landing burn commit: can light landing motor outside of abort limits as long as vehicle is on track to enter abort limits (predict from gyro rate and current ori)
 
 */
 

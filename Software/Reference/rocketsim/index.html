@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        height: 100vh;
+      }
+    </style>
+    <link rel="stylesheet" href="./uplot.css" />
+  </head>
+  
+    <div id="graph-wrap"></div>
+    <div id="vis-wrap">
+      <canvas id="visualizer-canvas"></canvas>
+    </div>
+    <input id="massInput" placeholder ="Mass (KG)" type="number">
+    <input id="dropHeight" placeholder ="Drop Height (m)" type="number">
+    <input id="rocketOnTime" placeholder ="Rocket On Time (sec)" type="number">
+    <input id="kp" placeholder ="KP" type="number">
+    <input id="ki" placeholder ="KI" type="number">
+    <input id="kd" placeholder ="KD" type="number">
+    <input id="length" placeholder ="Length (m)" type="number">
+    <input id="radius" placeholder ="Radius (m)" type="number">
+
+
+
+    <button id="startButton">RUN</button>
+
+    <script src="uplot.js"></script>
+    <script src="visualizer.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

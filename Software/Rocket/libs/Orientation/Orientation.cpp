@@ -51,8 +51,11 @@ void Orientation::updateGravity(float x, float y, float z)
 
 void Orientation::applyComplementary(Quaternion gravity, float alpha)
 {
+    //Rotate gravity vector into body frame
     Quaternion correction = Quaternion(gravity).normalize().rotation_between_vectors(expectedGravity);
-    correction = orientation.conj().rotate(correction.fractional(alpha)); // may just be orientation.rotate(correction.fractional(alpha)) idk
+    //Apply alpha scaling
+    correction = orientation.conj().rotate(correction.fractional(alpha));
+    //Add correction to gyro estimate
     orientation *= correction.normalize();
 }
 
