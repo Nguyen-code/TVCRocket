@@ -35,6 +35,7 @@ ACTUAL KALMAN FILTER IMPLEMENTATION FOR ARDUINO (USE THIS)
 https://github.com/DanInvents/Flight-Controller
 and
 https://github.com/TKJElectronics/KalmanFilter/blob/master/examples/MPU6050/MPU6050.ino
+https://github.com/FlyTheThings/uNavINS <---- THIS IS PERFECT FOR APPLICATION
 
 State is represented by a matrix x
 Each variable has a mean of mu and a variance of SD^2 - variance=uncertainty
