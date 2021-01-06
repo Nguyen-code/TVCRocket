@@ -135,6 +135,7 @@ landing burn commit: can light landing motor outside of abort limits as long as 
 #include "libs/Orientation/Quaternion.cpp"
 #include "libs/Orientation/Orientation.cpp"
 #include "libs/MS5611/MS5611.cpp"
+#include "libs/Ublox/SparkFun_Ublox_Arduino_Library.cpp"
 #include <SPIMemory.h>
 #include "math.h"
 
@@ -168,7 +169,7 @@ FlightMode flightMode = BOOTING;
 PyroStates pyroState = PY_DISARMED;
 ChuteStates chuteState = C_DISARMED;
 DataLoggingStates dataLoggingState = DL_DISABLED;
-TelemSendStates telemetryState = TEL_DISABLED;
+TelemSendStates telemetryState = TEL_ENABLED_30HZ;
 TelemConnStates telemetryConnectionState = TEL_DISCONNECTED;
 TVCEnabledMode tvcEnabled = TVC_DISABLED;
 OriMode oriMode = INIT;
@@ -191,25 +192,6 @@ Radio Command List
 0: Ping/pong check (heartbeat)
 1: GetRocketState
 2: SetRocketState
-3: RocketTelem
-sub IDs:
-	0 - time since startup, MET, loop freq
-	1 - flightmode, pyrostates, chutestates
-	2 - dataloggingstates, telemsendstates, telemconnstates
-	3 - battv, servov, rollmotorv
-	4 - boardtemp, gpsfix, gpssats
-	5 - gyro x, y, z
-	6 - acc x, y, z
-	7 - mag x, y, z
-	8 - gnss lat, gnss lon, alt
-	9 - ori x, y, z
-	10 - pos x, y, z
-	11 - vel x, y, z
-	12 - pyro1 cont, pyro2 cont, pyro3 cont
-	13 - pyro4 cont, pyro5 cont, blank
-	14 - pyro1 fire, pyro2 fire, pyro3 fire
-	15 - pyro4 fire, pyro5 fire, blank	
-	16 - tvc x, tvc y, blank
 4: RequestRocketTelem
 5: Enable/Disable Pyros
 6: FirePyro
@@ -228,20 +210,34 @@ typedef enum {
 const int radioTimeoutDelay = 5000;
 unsigned long lastRadioRecieveTime = 0;
 
-const byte radioQueueLength = 25;
-RadioPacket radioPacketQueue[radioQueueLength];
-unsigned long lastRadioSendTime = 0;
-byte radioStackPos = 0;
-
 /*
 TELEMETRY STRUCT
+*/
+/*
+	data-raw-gyro -> gyro data
+	data-raw-accel => accel data
+	data-ori => orientation fused frame data
+	data-pos => XYZ position (xPos, yPos, zPos, time) with xPos being vertical position (altitude)
+	data-vel => XYZ velocity (xVel, yVel, zVel, time) with xVel being vertical velocity
+
+	v-connect => vehicle has connected, start VOT timer
+	v-disconnect => vehicle has disconnected, stop VOT timer
+	DONE t-connect => arduino transmitter is connected
+	DONE t-disconnect => arduino transitter disconnected
+	vot-set => set vehicle on time forcefully in ms (vot)
+	met-set => set mission elapsed time forcefully in ms (met)
+	m-start => mission started, start MET timer
+	v-stop => mission stopped, stop MET timer
+
+	v-tvc => tvc update (y, z, active, rollPercent, rollSetpoint, twr, mass)
+
+	v-state => various state things (battV, rollV, servoV, vehicleState, pyroState, temp, signal, tlmRate, fixType, pDOP, horizAcc, vertAcc, gpsSats)
 */
 
 struct TELEMETRY {
 	//Raw vehicle information
 	unsigned long timeSinceStartup;
 	unsigned long missionElapsedTime;
-	double guidanceFrequency;
 
 	//State stuff
 	FlightMode fMode;
@@ -264,12 +260,8 @@ struct TELEMETRY {
 	double accX;
 	double accY;
 	double accZ;
-	double magX;
-	double magY;
-	double magZ;
-	double GNSSLat;
-	double GNSSLon;
-	double alt;
+	long GNSSLat;
+	long GNSSLon;
 
 	//Calculated state vector data
 	double oriX;
@@ -283,12 +275,25 @@ struct TELEMETRY {
 	double velZ;
 
 	//TVC Data
-	double tvcX;
 	double tvcY;
+	double tvcZ;
+	bool tvcActive;
+
+	//Roll wheel data
+	float rollPercent;
+	float rollSetpoint;
+
+	//Vehicle estimation
+	float twr;
+	float mass;
 	
 	//GNSS locking data
-	byte gpsFix;
-	int gpsSats;
+	byte GNSSFix;
+	int GNSSpDOP;
+	byte GNSSSats;
+	int GNSSAccHoriz; //mm
+	int GNSSAccVert; //mm
+	int GNSSAccVel; //mm
 
 	//Pyro channel data
 	bool pyro1Cont;
@@ -305,8 +310,6 @@ struct TELEMETRY {
 struct TELEMETRY telem;
 
 unsigned long lastTelem = 0;
-unsigned long lastHeartbeat = 0;
-const int heartbeatDelay = 200;
 
 /*
 ADC CONFIG
@@ -325,6 +328,12 @@ Bmi088Gyro gyro(Wire,GYRO_I2C_ADDR);
 MS5611 BAROMETER CONFIG
 */
 MS5611 ms5611;
+
+/*
+GNSS
+*/
+
+SFE_UBLOX_GPS GPS;
 
 /*
 FLASH MEMORY
@@ -387,8 +396,6 @@ PID yAxis(PID_Y_P, PID_Y_I, PID_Y_D, 0);
 /*
 MISC VARS
 */
-int loopCounter = 0;
-
 unsigned long lastSensorUpdate = 0;
 const int sensorUpdateDelay = 200;
 
@@ -502,6 +509,23 @@ void setup() {
 
 	Serial.print("SDFilename: ");
 	Serial.println(dataLogFilename);
+
+	//Setup GPS
+	if (GPS.begin(Wire, 0x42) == false) {
+		Serial.println("[INIT] SAM-M8Q GPS module failed to initialize");
+		error = true;
+	} else {
+		debugPrintln("[INIT] GPS INIT OK");
+	}
+	GPS.setI2COutput(COM_TYPE_UBX); //Set the I2C port to output UBX only (turn off NMEA noise)
+	GPS.setNavigationFrequency(5); //Produce five solutions per second
+	GPS.setAutoPVT(true); //Tell the GPS to "send" each solution
+	GPS.saveConfiguration(); //Save the current settings to flash and BBR
+
+	if (GPS.setDynamicModel(DYN_MODEL_AIRBORNE2g) == false) { // Set the dynamic model to airborne
+		Serial.println("[INIT] GPS dynamic model set fail");
+		error = true;
+	}
 	
 
 	//Setup BMI088
@@ -662,84 +686,84 @@ void loop() {
 
 		File dataFile = SD.open(dataLogFilename, FILE_WRITE);
 
-		if (dataFile) {
-			dataFile.println("timeSinceStartup,missionElapsedTime,guidanceFrequency,flightMode,pyroState,chuteState,dataLoggingState,telemSendState,telemConnState,battV,servoV,rollMotorV,boardTemp,gyroX,gyroY,gyroZ,alt,oriX,oriY,oriZ,tvcX,tvcY,pyro1Cont,pyro2Cont,pyro3Cont,pyro4Cont,pyro5Cont,pyro1Fire,pyro2Fire,pyro3Fire,pyro4Fire,pyro5Fire");
-			while (addr < flash.getCapacity()) {
-				flash.readAnything(addr, tlmOut);
-				if (isnan(tlmOut.battV)) {
-					break; //we got end
-				} else {
-					dataFile.print(tlmOut.timeSinceStartup);
-					dataFile.print(",");
-					dataFile.print(tlmOut.missionElapsedTime);
-					dataFile.print(",");
-					dataFile.print(tlmOut.guidanceFrequency);
-					dataFile.print(",");
-					dataFile.print(tlmOut.fMode);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pState);
-					dataFile.print(",");
-					dataFile.print(tlmOut.cState);
-					dataFile.print(",");
-					dataFile.print(tlmOut.dState);
-					dataFile.print(",");
-					dataFile.print(tlmOut.tSState);
-					dataFile.print(",");
-					dataFile.print(tlmOut.tCState);
-					dataFile.print(",");
-					dataFile.print(tlmOut.battV);
-					dataFile.print(",");
-					dataFile.print(tlmOut.servoV);
-					dataFile.print(",");
-					dataFile.print(tlmOut.rollMotorV);
-					dataFile.print(",");
-					dataFile.print(tlmOut.boardTemp);
-					dataFile.print(",");
-					dataFile.print(tlmOut.gyroX);
-					dataFile.print(",");
-					dataFile.print(tlmOut.gyroY);
-					dataFile.print(",");
-					dataFile.print(tlmOut.gyroZ);
-					dataFile.print(",");
-					dataFile.print(tlmOut.alt);
-					dataFile.print(",");
-					dataFile.print(tlmOut.oriX);
-					dataFile.print(",");
-					dataFile.print(tlmOut.oriY);
-					dataFile.print(",");
-					dataFile.print(tlmOut.oriZ);
-					dataFile.print(",");
-					dataFile.print(tlmOut.tvcX);
-					dataFile.print(",");
-					dataFile.print(tlmOut.tvcY);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro1Cont);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro2Cont);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro3Cont);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro4Cont);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro5Cont);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro1Fire);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro2Fire);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro3Fire);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro4Fire);
-					dataFile.print(",");
-					dataFile.print(tlmOut.pyro5Fire);
-					dataFile.println();
-				}
-				addr+=sizeof(TELEMETRY);
-			}
-			dataFile.close();
-		} else {
-			Serial.println("ERROR opening SD file");
-		}
+		// if (dataFile) {
+		// 	dataFile.println("timeSinceStartup,missionElapsedTime,guidanceFrequency,flightMode,pyroState,chuteState,dataLoggingState,telemSendState,telemConnState,battV,servoV,rollMotorV,boardTemp,gyroX,gyroY,gyroZ,alt,oriX,oriY,oriZ,tvcX,tvcY,pyro1Cont,pyro2Cont,pyro3Cont,pyro4Cont,pyro5Cont,pyro1Fire,pyro2Fire,pyro3Fire,pyro4Fire,pyro5Fire");
+		// 	while (addr < flash.getCapacity()) {
+		// 		flash.readAnything(addr, tlmOut);
+		// 		if (isnan(tlmOut.battV)) {
+		// 			break; //we got end
+		// 		} else {
+		// 			dataFile.print(tlmOut.timeSinceStartup);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.missionElapsedTime);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.guidanceFrequency);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.fMode);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pState);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.cState);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.dState);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.tSState);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.tCState);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.battV);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.servoV);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.rollMotorV);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.boardTemp);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.gyroX);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.gyroY);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.gyroZ);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.alt);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.oriX);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.oriY);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.oriZ);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.tvcX);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.tvcY);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro1Cont);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro2Cont);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro3Cont);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro4Cont);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro5Cont);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro1Fire);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro2Fire);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro3Fire);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro4Fire);
+		// 			dataFile.print(",");
+		// 			dataFile.print(tlmOut.pyro5Fire);
+		// 			dataFile.println();
+		// 		}
+		// 		addr+=sizeof(TELEMETRY);
+		// 	}
+		// 	dataFile.close();
+		// } else {
+		// 	Serial.println("ERROR opening SD file");
+		// }
 		transitionMode(LANDED);
 	}
 
@@ -847,7 +871,7 @@ void loop() {
 			altBufferPos = 0;
 		}
 
-		double total; //Take average of buffer
+		double total = 0; //Take average of buffer
 		for (int i=0; i<altBufferLen; i++) {
 			total+=altBuffer[i];
 		}
@@ -899,6 +923,19 @@ void loop() {
   		telem.pyro4Cont = adcPyroContinuity(telem.battV, ads2_3);
   		telem.pyro5Cont = adcPyroContinuity(telem.battV, ads1_3);
 
+  		//Get GPS stats and updates
+  		if (GPS.getPVT() && (GPS.getInvalidLlh() == false)) { //is there an update available
+  			telem.GNSSLon = GPS.getLongitude();
+	  		telem.GNSSLat = GPS.getLatitude();
+
+	  		telem.GNSSFix = GPS.getFixType();
+	  		telem.GNSSSats = GPS.getSIV();
+	  		telem.GNSSpDOP = GPS.getPDOP();
+	  		telem.GNSSAccVert = GPS.getVerticalAccEst();
+	  		telem.GNSSAccHoriz = GPS.getHorizontalAccEst();
+	  		telem.GNSSAccVel = GPS.getSpeedAccEst();
+  		}
+
 		lastSensorUpdate = millis();
 	}
 
@@ -915,10 +952,9 @@ void loop() {
 			telem.tSState = telemetryState;
 			telem.tCState = telemetryConnectionState;
 
-
 			//Set temp vars (FIXME make this right)
-			telem.tvcX = zAxis.getLast();
 			telem.tvcY = yAxis.getLast();
+			telem.tvcZ = xAxis.getLast();
 			telem.oriX = locX;
 			telem.oriY = locY;
 			telem.oriZ = locZ;
@@ -926,10 +962,8 @@ void loop() {
 			//Misc vars
 			telem.timeSinceStartup = millis();
 			telem.missionElapsedTime = (flightMode != IDLE && flightMode != CONN_WAIT && flightMode != BOOTING) ? millis() - flightStartTime : 0;
-			telem.guidanceFrequency = (float)loopCounter/((float)(millis()-lastSensorUpdate)/1000.0);
-			loopCounter = 0;
 			//Baro
-			telem.alt = currentAlt;
+			telem.posX = currentAlt;
 
 			flash.writeAnything(currentFlashAddr, telem);
 			currentFlashAddr+=sizeof(TELEMETRY);
@@ -939,22 +973,10 @@ void loop() {
 	/*
 	TELEMETRY
 	*/
-	if (telemetryState != TEL_DISABLED) {
-		//this next line is a meme
-		if (millis() - lastTelem > ((telemetryState == TEL_ENABLED_30HZ) ? 33.33 : (telemetryState == TEL_ENABLED_15HZ) ? 66.66 : (telemetryState == TEL_ENABLED_5HZ) ? 200 : (telemetryState == TEL_ENABLED_1HZ) ? 1000 : 5000)) {
-			debugPrintln("[TELEM] sent");
-			sendTelemetry();
-			lastTelem = millis();
-		}
-	}
-
-	/*
-	HEARTBEAT
-	*/
-	if (millis() - lastHeartbeat > heartbeatDelay) {
-		debugPrintln("[RADIO] hb");
-		addRadioPacketToQueue(HEARTBEAT, 0, 0, 0, 0);
-		lastHeartbeat = millis();
+	if ((millis() - lastTelem) > ((telemetryState == TEL_ENABLED_30HZ) ? 33.33 : (telemetryState == TEL_ENABLED_15HZ) ? 66.66 : 200)) {
+		debugPrintln("[TELEM] sent");
+		sendTelemetry();
+		lastTelem = millis();
 	}
 
 	/*
@@ -1077,21 +1099,6 @@ void loop() {
 		lastLED = millis();
 	}
 
-	/*
-	RADIO STACK/QUEUE
-	*/
-	if (radioStackPos > 0) {
-		if (millis() - lastRadioSendTime > RADIO_DELAY) {
-			for (int i=1; i<radioQueueLength; i++) { //Left shift all results by 1
-				radioPacketQueue[i-1] = radioPacketQueue[i];
-			}
-			radioStackPos--; //we've removed one from the stack
-			if (radioStackPos > 0) { //is there something new to send?
-				sendRadioPacket(radioPacketQueue[0]);
-				lastRadioSendTime = millis();
-			}
-		}
-	}
 	if (radio.available()) {
 		RadioPacket rx; //get poInteRiZeD!
 		uint8_t datalen = sizeof(rx);
@@ -1102,9 +1109,6 @@ void loop() {
 			Serial.println(rx.id);
 		}
 		switch (rx.id) {
-			case GETSTATE:
-				addRadioPacketToQueue(GETSTATE, 0, flightMode, pyroState, telemetryState);
-				break;
 			case SETSTATE:
 				if (rx.data1 == CONN_WAIT) {
 					transitionMode(CONN_WAIT);
@@ -1201,10 +1205,11 @@ void loop() {
 
 	}
 
-	/*
-	MISC
-	*/
-	loopCounter++;
+	if (flightMode != LAUNCH) {
+		radio.waitAvailableTimeout(40);
+	} else {
+		radio.waitAvailableTimeout(1);
+	}
 }
 
 void transitionMode(FlightMode newMode) {
@@ -1276,47 +1281,8 @@ void transitionMode(FlightMode newMode) {
 }
 
 void sendTelemetry() {
-	// sub IDs:
-	// 0 - time since startup, MET, loop freq
-	// 1 - flightmode, pyrostates, chutestates
-	// 2 - dataloggingstates, telemsendstates, telemconnstates
-	// 3 - battv, servov, rollmotorv
-	// 4 - boardtemp, gpsfix, gpssats
-	// 5 - gyro x, y, z
-	// 6 - acc x, y, z
-	// 7 - mag x, y, z
-	// 8 - gnss lat, gnss lon, alt
-	// 9 - ori x, y, z
-	// 10 - pos x, y, z
-	// 11 - vel x, y, z
-	// 12 - pyro1 status, pyro2 status, pyro3 status
-	// 13 - pyro4 status, pyro5 status, blank
-	// 14 - pyro1 fire, pyro2 fire, pyro3 fire
-	// 15 - pyro4 fire, pyro5 fire, blank	
-	// 16 - tvc x, tvc y, blank
-
-	//addRadioPacketToQueue(GETTELEM, 0, telem.timeSinceStartup, telem.missionElapsedTime, telem.guidanceFrequency);
-	addRadioPacketToQueue(GETTELEM, 1, telem.fMode, telem.pState, telem.cState);
-	//addRadioPacketToQueue(GETTELEM, 2, telem.dState, telem.tSState, telem.tCState);
-	addRadioPacketToQueue(GETTELEM, 3, telem.battV, telem.servoV, telem.rollMotorV);
-	//addRadioPacketToQueue(GETTELEM, 4, telem.boardTemp, telem.gpsFix, telem.gpsSats);
-
-	//addRadioPacketToQueue(GETTELEM, 5, telem.gyroX, telem.gyroY, telem.gyroZ);
-	//addRadioPacketToQueue(GETTELEM, 6, telem.accX, telem.accY, telem.accZ);
-	// addRadioPacketToQueue(GETTELEM, 7, telem.magX, telem.magY, telem.magZ);
-	// addRadioPacketToQueue(GETTELEM, 8, telem.GNSSLat, telem.GNSSLon, telem.alt);
-
-	// addRadioPacketToQueue(GETTELEM, 9, telem.oriX, telem.oriY, telem.oriZ);
-	// addRadioPacketToQueue(GETTELEM, 10, telem.posX, telem.posY, telem.posZ);
-	// addRadioPacketToQueue(GETTELEM, 11, telem.velX, telem.velY, telem.velZ);
-
-	addRadioPacketToQueue(GETTELEM, 12, (telem.pyro1Cont ? 1.0 : 0.0), (telem.pyro2Cont ? 1.0 : 0.0), (telem.pyro3Cont ? 1.0 : 0.0));
-	addRadioPacketToQueue(GETTELEM, 13, (telem.pyro4Cont ? 1.0 : 0.0), (telem.pyro5Cont ? 1.0 : 0.0), 0);
-
-	// addRadioPacketToQueue(GETTELEM, 14, telem.pyro1Fire, telem.pyro2Fire, telem.pyro3Fire);
-	// addRadioPacketToQueue(GETTELEM, 15, telem.pyro4Fire, telem.pyro5Fire, 0);
-
-	// addRadioPacketToQueue(GETTELEM, 16, telem.tvcX, telem.tvcY, 0);
+	radio.send((uint8_t*)&telem, sizeof(telem)); //Gotta love this cursed line of C
+	radio.waitPacketSent();
 }
 
 boolean adcPyroContinuity(float battV, int16_t pyroReading) {
@@ -1324,10 +1290,8 @@ boolean adcPyroContinuity(float battV, int16_t pyroReading) {
 	//Serial.print("Drop=");
 	//Serial.print(vDrop);
 	if (vDrop <= ADC_PYRO_THRESH_CONT) {
-		//Serial.println(" Stat=Cont");
 		return true; //We got dat continuity lads
 	} else {
-		//Serial.println(" Stat=Disconn");
 		return false; //Disconnected :(
 	}
 }
@@ -1337,7 +1301,7 @@ void configureInitialConditions() {
 	pyroState = PY_DISARMED;
 	chuteState = C_DISARMED;
 	dataLoggingState = DL_ENABLED_40HZ;
-	telemetryState = TEL_ENABLED_1HZ;
+	telemetryState = TEL_ENABLED_30HZ;
 	telemetryConnectionState = TEL_DISCONNECTED;
 	tvcEnabled = TVC_DISABLED;
 
@@ -1465,35 +1429,5 @@ void writeTVCCH2(float x, float y) {
 	} else {
 		TVC_X_CH2.write(90 + TVC_X_CH2_OFFSET);
 		TVC_Y_CH2.write(90 + TVC_Y_CH2_OFFSET);
-	}
-}
-
-
-bool addRadioPacketToQueue(uint8_t id, uint8_t subID, float data1, float data2, float data3) {
-	if (radioStackPos < radioQueueLength && id >= 0 && subID >= 0) {
-		//Override packet in place w/ radio ID
-		radioPacketQueue[radioStackPos].id = id;
-		radioPacketQueue[radioStackPos].subID = subID;
-		radioPacketQueue[radioStackPos].data1 = data1;
-		radioPacketQueue[radioStackPos].data2 = data2;
-		radioPacketQueue[radioStackPos].data3 = data3;
-
-		radioStackPos++; //go up 1 stackpos
-		if (radioStackPos == 1) {
-			sendRadioPacket(radioPacketQueue[0]); //if it's the 1st one, send it
-			lastRadioSendTime = millis();
-		}
-		return true;
-	}
-	return false;
-}
-
-void sendRadioPacket(RadioPacket tx) {
-	radio.send((uint8_t*)&tx, sizeof(tx)); //Gotta love this cursed line of C
-	radio.waitPacketSent();
-	if (flightMode == LAUNCH) {
-		radio.waitAvailableTimeout(1); //FIXME: THIS IS A HACK THIS SHOULD NOT BE HERE
-	} else {
-		radio.waitAvailableTimeout(100); //FIXME
 	}
 }

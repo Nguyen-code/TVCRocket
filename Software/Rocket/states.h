@@ -52,9 +52,7 @@ enum DataLoggingStates {
 enum TelemSendStates {
 	TEL_ENABLED_30HZ,
 	TEL_ENABLED_15HZ,
-	TEL_ENABLED_5HZ,
-	TEL_ENABLED_1HZ,
-	TEL_DISABLED
+	TEL_ENABLED_5HZ
 };
 
 
