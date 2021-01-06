@@ -168,7 +168,7 @@ FLIGHT MODE ENUMS
 FlightMode flightMode = BOOTING;
 PyroStates pyroState = PY_DISARMED;
 ChuteStates chuteState = C_DISARMED;
-DataLoggingStates dataLoggingState = DL_DISABLED;
+DataLoggingStates dataLoggingState = DL_ENABLED_5HZ;
 TelemSendStates telemetryState = TEL_ENABLED_30HZ;
 TelemConnStates telemetryConnectionState = TEL_DISCONNECTED;
 TVCEnabledMode tvcEnabled = TVC_DISABLED;
@@ -181,30 +181,26 @@ RH_RF95 radio(RADIO_CS, RADIO_IRQ);
 
 struct RadioPacket {
 	uint8_t id;
-	uint8_t subID;
-	float data1;
-	float data2;
-	float data3;
+	int data1;
+	int data2;
+	int data3;
 };
 
 /*
 Radio Command List
 0: Ping/pong check (heartbeat)
-1: GetRocketState
-2: SetRocketState
-4: RequestRocketTelem
-5: Enable/Disable Pyros
-6: FirePyro
+1: SetRocketState
+2: RequestRocketTelem
+3: Enable/Disable Pyros
+4: FirePyro
 */
 
 typedef enum {
 	HEARTBEAT = 0,
-	GETSTATE = 1,
-	SETSTATE = 2,
-	GETTELEM = 3,
-	REQTELEM = 4,
-	PYROARMING = 5,
-	FIREPYRO = 6
+	SETSTATE = 1,
+	REQTELEM = 2,
+	PYROARMING = 3,
+	FIREPYRO = 4
 } RadioCommands;
 
 const int radioTimeoutDelay = 5000;
@@ -770,7 +766,6 @@ void loop() {
 	/*
 	ESSENTIAL ORIENTATION CALCULATIONS
 	*/
-
 	double dtOri = (double)(micros()-lastOriMicros) / 1000000.0;
 	if (dtOri > ORI_CALC_DELTA) {
 		if (oriMode == COMPLEMENTARY && gyro_ready && accel_ready) {
@@ -782,6 +777,7 @@ void loop() {
 			gyroMeasure.roll = (gyro.getGyroX_rads() + gbiasX);
 			gyroMeasure.pitch = -(gyro.getGyroZ_rads() + gbiasY);
 			gyroMeasure.yaw = -(gyro.getGyroY_rads() + gbiasZ);
+
 
 			ori.update(gyroMeasure, dtOri);
 
@@ -827,6 +823,23 @@ void loop() {
 			oriMode = CALCBIASES;
 		}
 
+		if (gyro_ready) {
+			gyro.readSensor();
+			telem.gyroX = (gyro.getGyroX_rads() + gbiasX);
+			telem.gyroY = -(gyro.getGyroY_rads() + gbiasY);
+			telem.gyroZ = -(gyro.getGyroZ_rads() + gbiasZ);
+
+			telem.gyroX = gyroMeasure.roll;
+			telem.gyroY = gyroMeasure.yaw;
+			telem.gyroZ = gyroMeasure.pitch;
+		}
+		if (accel_ready) {
+			accel.readSensor();
+			telem.accX = accel.getAccelX_mss();
+			telem.accY = accel.getAccelY_mss();
+			telem.accZ = accel.getAccelZ_mss();
+		}
+
 		gyroOut = ori.toEuler();
 
 		locX = gyroOut.roll*GYRO_MULT;
@@ -843,7 +856,6 @@ void loop() {
 	*/
 	double dtTVC = (double)(micros()-lastTVCMicros) / 1000000.0;
 	if (dtTVC > SERVO_WRITE_DELTA && tvcEnabled == TVC_ENABLED) {
-		Serial.println("TVCWRITE");
 		float zAng = zAxis.getLast();
 		float yAng = yAxis.getLast();
 
@@ -865,18 +877,8 @@ void loop() {
 	if (dtAlt > BARO_CALC_DELTA) {
 		long pressure = ms5611.readPressure(true);
 
-		altBuffer[altBufferPos] = ms5611.getAltitude(pressure);
-		altBufferPos++;
-		if (altBufferPos > altBufferLen) {
-			altBufferPos = 0;
-		}
-
-		double total = 0; //Take average of buffer
-		for (int i=0; i<altBufferLen; i++) {
-			total+=altBuffer[i];
-		}
-		total/=(double)altBufferLen;
-		currentAlt = total;
+		currentAlt = ms5611.getAltitude(pressure);
+		telem.posX = currentAlt;
 
 		altSlope = (currentAlt-lastAlt)/dtAlt;
 		
@@ -954,16 +956,15 @@ void loop() {
 
 			//Set temp vars (FIXME make this right)
 			telem.tvcY = yAxis.getLast();
-			telem.tvcZ = xAxis.getLast();
+			telem.tvcZ = zAxis.getLast();
 			telem.oriX = locX;
 			telem.oriY = locY;
 			telem.oriZ = locZ;
 
+
 			//Misc vars
 			telem.timeSinceStartup = millis();
 			telem.missionElapsedTime = (flightMode != IDLE && flightMode != CONN_WAIT && flightMode != BOOTING) ? millis() - flightStartTime : 0;
-			//Baro
-			telem.posX = currentAlt;
 
 			flash.writeAnything(currentFlashAddr, telem);
 			currentFlashAddr+=sizeof(TELEMETRY);
@@ -1099,6 +1100,9 @@ void loop() {
 		lastLED = millis();
 	}
 
+	/*
+	RADIO CHECK
+	*/
 	if (radio.available()) {
 		RadioPacket rx; //get poInteRiZeD!
 		uint8_t datalen = sizeof(rx);
@@ -1155,7 +1159,6 @@ void loop() {
 	/*
 	PYRO CHANNELS
 	*/
-
 	if (pyrosInUse > 0) {
 		if (pyroState == PY_ARMED) {
 			for (int i=0; i<5; i++) {
@@ -1206,7 +1209,7 @@ void loop() {
 	}
 
 	if (flightMode != LAUNCH) {
-		radio.waitAvailableTimeout(40);
+		radio.waitAvailableTimeout(60);
 	} else {
 		radio.waitAvailableTimeout(1);
 	}
@@ -1231,7 +1234,7 @@ void transitionMode(FlightMode newMode) {
 		Serial.println(newMode);
 
 		if (newMode == CONN_WAIT || newMode == IDLE) {
-			dataLoggingState = DL_DISABLED;
+			dataLoggingState = DL_ENABLED_5HZ;
 			pyroState = PY_DISARMED;
 		} else if (newMode == LAUNCH) {
 			Serial.println("LAUNCH INITIATED");
