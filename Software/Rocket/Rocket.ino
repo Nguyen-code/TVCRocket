@@ -1114,7 +1114,9 @@ void loop() {
 		}
 		switch (rx.id) {
 			case SETSTATE:
-				if (rx.data1 == CONN_WAIT) {
+				if (rx.data1 == BOOTING) {
+					transitionMode(BOOTING);
+				} if (rx.data1 == CONN_WAIT) {
 					transitionMode(CONN_WAIT);
 				} else if (rx.data1 == IDLE) {
 					transitionMode(IDLE);
@@ -1233,7 +1235,9 @@ void transitionMode(FlightMode newMode) {
 		Serial.print("[STATE] switch to newState: ");
 		Serial.println(newMode);
 
-		if (newMode == CONN_WAIT || newMode == IDLE) {
+		if (newMode == BOOTING) {
+			configureInitialConditions(); //cfg initial conditions
+		} if (newMode == CONN_WAIT || newMode == IDLE) {
 			dataLoggingState = DL_ENABLED_5HZ;
 			pyroState = PY_DISARMED;
 		} else if (newMode == LAUNCH) {
