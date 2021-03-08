@@ -27,27 +27,18 @@ Thrust curve interpolation
 https://github.com/luisllamasbinaburo/Arduino-Interpolation
 
 
-optimizations:
-telem can use different packet struct?
-potential for PWM resolution changing? https://www.pjrc.com/teensy/td_pulse.html
-
-
-things to test:
-pyro channels (all 5)
-servo movement and centering
-PID values (duh)
-flash chip!
-sd!
-max travel constants
-reset I in PID before liftoff
-IMU use interrupts
 
 self test where rocket checks the following:
 - rail voltages ok
 - batt v within range
 - pyro continuous vs short detect - make sure not shorted
 
-zeroing
+TODOS:
+make constant for servo angle to tvc mount angle and test accuracy
+potential for PWM resolution changing? https://www.pjrc.com/teensy/td_pulse.html
+use high grav/low grav accelerometer - when over 7g, flip measurements over to high g accelerometer
+On startup, check flash chip for any data that was left on it and dump to SD
+
 
 ori stuff
 1) start in calibrate mode on pad
@@ -56,9 +47,7 @@ ori stuff
 4) launch go gyro only
 Also use interrupts for sensor
 
-make constant for servo angle to tvc mount angle\
-
-Everything that joe is logging:
+Everything that joe is logging that I should as well:
 ones that make sense:
 - avi voltage
 - data error flag
@@ -67,6 +56,7 @@ ones that make sense:
 - py 1-5 continuity
 - py 1-5 fire
 - vehicle mass (lin approx)
+- flight time in sec
 - baro alt (long avg)
 - tvc y, z error
 - Leg deployment
@@ -87,6 +77,8 @@ ones that make sense:
 - ori setpoints
 - roll wheel setpoint
 - tvc torque z, y
+- baro pressure
+- max alt
 - gnss pdop
 - gnss fix type (3d, etc)
 - gnss sat count (SIV)

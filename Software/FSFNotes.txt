@@ -8,6 +8,11 @@ https://dspace.mit.edu/bitstream/handle/1721.1/12473/29895646-MIT.pdf?sequence=2
 https://cdn.discordapp.com/attachments/355570980053319692/788479310268334100/unknown.png
 https://arxiv.org/ftp/arxiv/papers/1908/1908.07401.pdf
 
+Q-guidance as alternative
+https://en.wikipedia.org/wiki/Q-guidance
+
+https://codepen.io/polishdude20/pen/xxRLdxO
+
 https://www.mathworks.com/help/dsp/ug/generate-c-code-from-simulink-model.html
 https://www.youtube.com/watch?v=reRT8LbPhBs&start=482
 https://lib.dr.iastate.edu/cgi/viewcontent.cgi?referer=https://www.google.com/&httpsredir=1&article=2578&context=etd
