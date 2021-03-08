@@ -12,6 +12,7 @@ Sensor List
 IMU: BMI088
 
 ms5611 https://github.com/jarzebski/Arduino-MS5611
+new antenna https://www.videoaerialsystems.com/products/868-900mhz-longshot-antenna
 
 
 update todo notes:
@@ -117,6 +118,9 @@ use more simulation to know where the vehicle "should be" based on Cd after land
 use divert altitude error (error from the vehicle's should be calculation to where it actually is) to come up with bleed percent (peak amplitude of sin wave divert)
 can calculate bleed percent with 100-motorthrust*cos(mountangle) = bleed percent
 landing burn commit: can light landing motor outside of abort limits as long as vehicle is on track to enter abort limits (predict from gyro rate and current ori)
+
+if(micros() < lastMicros) weRolledOver();
+Micros rollover count
 
 */
 
