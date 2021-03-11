@@ -85,14 +85,6 @@ struct S_TELEMETRY_SENSOR {
 static struct S_TELEMETRY_STATE telem_state;
 static struct S_TELEMETRY_SENSOR telem_sensor;
 
-//Find closest buffer size to packet sizes that are divisible by 16
-const uint8_t state_aes_buffer_size = sizeof(S_TELEMETRY_STATE) - (sizeof(S_TELEMETRY_STATE) % 16) + 16;
-const uint8_t sensor_aes_buffer_size = sizeof(S_TELEMETRY_SENSOR) - (sizeof(S_TELEMETRY_SENSOR) % 16) + 16;
-
-//Allocate AES buffer
-uint8_t state_aes_buffer[state_aes_buffer_size];
-uint8_t sensor_aes_buffer[sensor_aes_buffer_size];
-
 //Define AES stuff (at 128 bit encryption, this is a 16 byte key)
 const uint8_t aes_key[KEYLENGTH(KEYBITS)] = {0x80, 0x08, 0x13, 0x58, 0x00, 0x81, 0x35, 0x80, 0x08, 0x13, 0x58, 0x00, 0x81, 0x35, 0x00, 0x01};
 uint32_t rk[RKLENGTH(KEYBITS)];
@@ -122,40 +114,11 @@ void setup() {
 	}
 	Serial.println("\n");
 
-	//Copy data into plain buffer
-	uint8_t telemPlain[sizeof(S_TELEMETRY_STATE)];
-	memcpy(telemPlain, (uint8_t*)&telem_state, sizeof(S_TELEMETRY_STATE));
-	Serial.println("PLAINTEXT ------");
-	for (int i=0; i<sizeof(S_TELEMETRY_STATE); i++) {
-		Serial.print("0x");
-		Serial.print(telemPlain[i], HEX);
-		Serial.print(" ");
-	}
-	Serial.println("\n----------\n");
-
-
-	//Encrypt data
-	int nroundsEnc = aesSetupEncrypt(rk, *aes_key, KEYBITS);
-	memset(state_aes_buffer, 0, sizeof(state_aes_buffer)); //Reset state_aes_buffer
-	memcpy(state_aes_buffer, (uint8_t*)&telem_state, sizeof(S_TELEMETRY_STATE)); //Copy plaintext telemetry data into buffer
-	Serial.println("PLAINTEXT PADDED TO %16 ------");
-	for (int i=0; i<state_aes_buffer_size; i++) {
-		Serial.print("0x");
-		Serial.print(state_aes_buffer[i], HEX);
-		Serial.print(" ");
-	}
-	Serial.println("\n----------\n");
-
-	//Proceed block by block and encrypt the data
-	for (int i=0; i<state_aes_buffer_size/16; i++) {
-		uint8_t toEncrypt[16];
-		uint8_t encrypted[16];
-		memcpy(toEncrypt, state_aes_buffer+(i*16), 16); //copy single block to be encrypted
-		aesEncrypt(rk, nroundsEnc, toEncrypt, encrypted);
-		memcpy(state_aes_buffer+(i*16), encrypted, 16); //copy data back into buffer
-	}
+	uint8_t state_aes_buffer[getPacketSize(sizeof(S_TELEMETRY_STATE))];
+	encryptPacket(state_aes_buffer, (uint8_t*)&telem_state, sizeof(S_TELEMETRY_STATE));
+	
 	Serial.println("ENCRYPTED ------");
-	for (int i=0; i<state_aes_buffer_size; i++) {
+	for (int i=0; i<sizeof(state_aes_buffer); i++) {
 		Serial.print("0x");
 		Serial.print(state_aes_buffer[i], HEX);
 		Serial.print(" ");
@@ -163,10 +126,10 @@ void setup() {
 	Serial.println("\n----------\n");
 
 	//Decrypt data
-	int nroundsDec = aesSetupDecrypt(rk, *aes_key, KEYBITS);
+	int nroundsDec = aesSetupDecrypt(rk, aes_key, KEYBITS);
 	
 	//Proceed block by block and encrypt the data
-	for (int i=0; i<state_aes_buffer_size/16; i++) {
+	for (int i=0; i<sizeof(state_aes_buffer)/16; i++) {
 		uint8_t toDecrypt[16];
 		uint8_t decrypted[16];
 		memcpy(toDecrypt, state_aes_buffer+(i*16), 16); //copy single block to be decrypted
@@ -175,7 +138,7 @@ void setup() {
 	}
 
 	Serial.println("DECRYPTED ------");
-	for (int i=0; i<state_aes_buffer_size; i++) {
+	for (int i=0; i<sizeof(state_aes_buffer); i++) {
 		Serial.print("0x");
 		Serial.print(state_aes_buffer[i], HEX);
 		Serial.print(" ");
@@ -185,6 +148,39 @@ void setup() {
 
 	
 
+}
+
+const int getPacketSize(int data_size) {
+	return data_size - (data_size % 16) + 16;
+}
+
+void encryptPacket(uint8_t *out, uint8_t *unpaddedData, const int data_size) {
+	//Get nRounds, or number of rounds of encryption to do
+	int nroundsEnc = aesSetupEncrypt(rk, aes_key, KEYBITS);
+
+	//Find closest buffer size to packet sizes that are divisible by 16
+	const uint8_t aes_buffer_size = data_size - (data_size % 16) + 16;
+
+	//Allocate AES buffer
+	uint8_t aes_buffer[aes_buffer_size];
+
+	//Reset aes_buffer
+	memset(aes_buffer, 0, aes_buffer_size);
+	//Copy plaintext data into buffer
+	memcpy(aes_buffer, unpaddedData, data_size);
+
+	//Proceed block by block and encrypt the data
+	for (int i=0; i<aes_buffer_size/16; i++) {
+		//Declare single block arrays
+		uint8_t toEncrypt[16];
+		uint8_t encrypted[16];
+		memcpy(toEncrypt, aes_buffer+(i*16), 16); //copy single block to be encrypted
+		aesEncrypt(rk, nroundsEnc, toEncrypt, encrypted); //Do the encryption
+		memcpy(aes_buffer+(i*16), encrypted, 16); //copy data back into buffer
+	}
+
+	memcpy(out, aes_buffer, aes_buffer_size);
+	
 }
 
 void loop() {
