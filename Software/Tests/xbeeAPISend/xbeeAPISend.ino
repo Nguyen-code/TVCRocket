@@ -154,15 +154,12 @@ const int getPacketSize(int data_size) {
 	return data_size - (data_size % 16) + 16;
 }
 
-void encryptPacket(uint8_t *out, uint8_t *unpaddedData, const int data_size) {
+void encryptPacket(uint8_t *aes_buffer, uint8_t *unpaddedData, const int data_size) {
 	//Get nRounds, or number of rounds of encryption to do
 	int nroundsEnc = aesSetupEncrypt(rk, aes_key, KEYBITS);
 
 	//Find closest buffer size to packet sizes that are divisible by 16
 	const uint8_t aes_buffer_size = data_size - (data_size % 16) + 16;
-
-	//Allocate AES buffer
-	uint8_t aes_buffer[aes_buffer_size];
 
 	//Reset aes_buffer
 	memset(aes_buffer, 0, aes_buffer_size);
@@ -178,9 +175,6 @@ void encryptPacket(uint8_t *out, uint8_t *unpaddedData, const int data_size) {
 		aesEncrypt(rk, nroundsEnc, toEncrypt, encrypted); //Do the encryption
 		memcpy(aes_buffer+(i*16), encrypted, 16); //copy data back into buffer
 	}
-
-	memcpy(out, aes_buffer, aes_buffer_size);
-	
 }
 
 void loop() {
