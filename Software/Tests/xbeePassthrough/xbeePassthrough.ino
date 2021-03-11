@@ -15,11 +15,11 @@
  * B MY+DH+DL: 0x1 0x0 0x0
  */
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   XBSerial.begin(XBBaudRate);
 }
 
-bool sendTestData = true;
+bool sendTestData = false;
 unsigned long lastTestTime = 0;
 
 void loop() {

@@ -1,90 +1,87 @@
 
 #include <XBee.h>
-#include "states.h"
+#include "libs/states.h"
+#include "libs/AES/AES.cpp"
 
 /*
-This example is for Series 2 XBee
- Sends a ZB TX request with the value of analogRead(pin5) and checks the status response for success
+Test sending encrypted packets using XBee API mode and an AES library
+Should be uploaded to board with MY address of 0 and DL set to 0x0
 */
 
 
 /*
-TELEMETRY STRUCT
+TELEMETRY STRUCTS
 */
-struct TELEMETRY {
-  //Raw vehicle information
-  unsigned long timeSinceStartup;
-  unsigned long missionElapsedTime;
-//
-//  //State stuff
-//  FlightMode fMode;
-//  PyroStates pState;
-//  ChuteStates cState;
-//  DataLoggingStates dState;
-//  TelemSendStates tSState;
-//  TelemConnStates tCState;
-//
-//  //Basic sensor data
-//  float battV;
-//  float servoV;
-//  float rollMotorV;
-//  float boardTemp;
-//
-//  //Raw sensor data
-//  double gyroX;
-//  double gyroY;
-//  double gyroZ;
-//  double accX;
-//  double accY;
-//  double accZ;
-//  long GNSSLat;
-//  long GNSSLon;
-//
-//  //Calculated state vector data
-//  double oriX;
-//  double oriY;
-//  double oriZ;
-//  double posX;
-//  double posY;
-//  double posZ;
-//  double velX;
-//  double velY;
-//  double velZ;
-//
-//  //TVC Data
-//  double tvcY;
-//  double tvcZ;
-//  bool tvcActive;
-//
-//  //Roll wheel data
-//  float rollPercent;
-//  float rollSetpoint;
-//
-//  //Vehicle estimation
-//  float twr;
-//  float mass;
-//  
-//  //GNSS locking data
-//  byte GNSSFix;
-//  int GNSSpDOP;
-//  byte GNSSSats;
-//  int GNSSAccHoriz; //mm
-//  int GNSSAccVert; //mm
-//  int GNSSAccVel; //mm
-//
-//  //Pyro channel data
-//  bool pyro1Cont;
-//  bool pyro2Cont;
-//  bool pyro3Cont;
-//  bool pyro4Cont;
-//  bool pyro5Cont;
-//  bool pyro1Fire;
-//  bool pyro2Fire;
-//  bool pyro3Fire;
-//  bool pyro4Fire;
-//  bool pyro5Fire;
+struct S_TELEMETRY_STATE {
+	//Raw vehicle information
+	unsigned long timeSinceStartup;
+	unsigned long missionElapsedTime;
+
+	//State stuff
+	FlightMode fMode;
+	PyroStates pState;
+	ChuteStates cState;
+	DataLoggingStates dState;
+	TelemSendStates tSState;
+	TelemConnStates tCState;
+
+	//Basic sensor data
+	float battV;
+	float servoV;
+	float rollMotorV;
+	float boardTemp;
+
+	//Vehicle estimation
+	float twr;
+	float mass;
+
+	//GNSS locking data
+	byte GNSSFix;
+	int GNSSpDOP;
+	byte GNSSSats;
+	int GNSSAccHoriz; //mm
+	int GNSSAccVert; //mm
+	int GNSSAccVel; //mm
+
+	//Pyro channel data
+	byte pyroCont;
+	byte pyroFire;
 };
-static struct TELEMETRY telem;
+
+struct S_TELEMETRY_SENSOR {
+	//Raw sensor data
+	float gyroX;
+	float gyroY;
+	float gyroZ;
+	float accX;
+	float accY;
+	float accZ;
+	long GNSSLat;
+	long GNSSLon;
+
+	//Calculated state vector data
+	float oriX;
+	float oriY;
+	float oriZ;
+	float posX;
+	float posY;
+	float posZ;
+	float velX;
+	float velY;
+	float velZ;
+
+	//TVC Data
+	float tvcY;
+	float tvcZ;
+	bool tvcActive;
+
+	//Roll wheel data
+	float rollPercent;
+	float rollSetpoint;
+};
+
+static struct S_TELEMETRY_STATE telem_state;
+static struct S_TELEMETRY_SENSOR telem_sensor;
 
 // create the XBee object
 XBee xbee = XBee();
@@ -92,22 +89,44 @@ XBeeResponse response = XBeeResponse();
 Rx16Response rx16 = Rx16Response();
 
 void setup() {
-  Serial.begin(9600);
-  Serial1.begin(115200);
-  xbee.setSerial(Serial1);
-  delay(1000);
+	Serial.begin(115200);
+	Serial1.begin(115200);
+	xbee.setSerial(Serial1);
+	delay(1000);
 }
 
 void loop() {
-  xbee.readPacket();
-  if (xbee.getResponse().isAvailable()) {
-    xbee.getResponse().getRx16Response(rx16);
-    TELEMETRY recv = (TELEMETRY &)*rx16.getData();
-    telem.timeSinceStartup = recv.timeSinceStartup;
+	xbee.readPacket();
+	if (xbee.getResponse().isAvailable()) {
+		if (xbee.getResponse().getApiId() == RX_16_RESPONSE) { //expect rx_16 only
+			xbee.getResponse().getRx16Response(rx16);
+			int packetLength = rx16.getDataLength();
+			Serial.print("PL");
+			Serial.println(packetLength);
+			switch (packetLength) {
+				default:
+					Serial.println("Got packet of unknown size");
+					break;
+				case sizeof(S_TELEMETRY_STATE):
+					Serial.println("Got state packet");
+					S_TELEMETRY_STATE recv = (S_TELEMETRY_STATE &)*rx16.getData();
+					telem_state.timeSinceStartup = recv.timeSinceStartup;
+					break;
+				case sizeof(S_TELEMETRY_SENSOR):
+					Serial.println("Got sensor packet");
+					break;
+			}
+		}
 
-    Serial.print("TelemTime: "); Serial.print(telem.timeSinceStartup);
+		if (xbee.getResponse().isError()) {
+		  Serial.print("Error: ");
+		  Serial.println(xbee.getResponse().getErrorCode());
+		} 
+		
 
-    uint8_t rssi = rx16.getRssi();
-    Serial.print(" RSSI: "); Serial.println(rssi);
-  }
+		Serial.print("TelemTime: "); Serial.print(telem_state.timeSinceStartup);
+
+		uint8_t rssi = rx16.getRssi();
+		Serial.print(" RSSI: "); Serial.println(rssi);
+	}
 }
