@@ -1,4 +1,3 @@
-
 #include <XBee.h>
 #include "libs/states.h"
 #include "libs/AES/AES.cpp"
@@ -11,7 +10,24 @@ Should be uploaded to board with MY address of 0 and DL set to 0x0
 
 /*
 TELEMETRY STRUCTS
+
+How does telemetry sending work?
+
+3 different packet types (to conform to XBee packet size limitations in API mode)
+"State": holds vehicle state information vehicle -> ground
+"Sensor": holds sensor information vehicle -> ground
+"Control": holds some command packet ground -> vehicle
+
+Packet structure:
+1st byte: packet type@TELEM_PACKET_TYPE
+2nd-n(closest multiple that aligns with AES block size) bytes: AES-128 encrypted data
 */
+typedef enum {
+	TELEM_PACKET_TYPE_STATE = 0x00,
+	TELEM_PACKET_TYPE_SENSOR = 0x01,
+	TELEM_PACKET_TYPE_CONTROL = 0x02
+} TELEM_PACKET_TYPE;
+
 struct S_TELEMETRY_STATE {
 	//Raw vehicle information
 	unsigned long timeSinceStartup;
@@ -80,25 +96,44 @@ struct S_TELEMETRY_SENSOR {
 	float rollSetpoint;
 };
 
+struct S_TELEMETRY_CONTROL {
+	byte commandID;
+	byte data1;
+	byte data2;
+	byte data3;
+};
+
 //Define structs used to hold data
-static struct S_TELEMETRY_STATE telem_state;
-static struct S_TELEMETRY_SENSOR telem_sensor;
+struct S_TELEMETRY_STATE telem_state;
+struct S_TELEMETRY_SENSOR telem_sensor;
+struct S_TELEMETRY_CONTROL telem_control;
 
 //Define AES stuff (at 128 bit encryption, this is a 16 byte key)
 #define KEYBITS 128
+//Get buffer size padded out to the next largest correct block size (16 bytes)
 #define getAESBufferSize(unpadded_size) unpadded_size - (unpadded_size % 16) + 16
+//Includes an extra byte for packet type at beginning
+#define getPacketBufferSize(unpadded_size) getAESBufferSize(unpadded_size) + 1
 
 const uint8_t aes_key[KEYLENGTH(KEYBITS)] = {0x80, 0x08, 0x13, 0x58, 0x00, 0x81, 0x35, 0x80, 0x08, 0x13, 0x58, 0x00, 0x81, 0x35, 0x00, 0x01};
 uint32_t rk[RKLENGTH(KEYBITS)];
 
-uint8_t state_aes_buffer[getAESBufferSize(sizeof(S_TELEMETRY_STATE))];
-uint8_t sensor_aes_buffer[getAESBufferSize(sizeof(S_TELEMETRY_SENSOR))];
+//Buffer sizes for different packet types
+#define state_packet_buffer_size getPacketBufferSize(sizeof(S_TELEMETRY_STATE))
+#define sensor_packet_buffer_size getPacketBufferSize(sizeof(S_TELEMETRY_SENSOR))
+#define control_packet_buffer_size getPacketBufferSize(sizeof(S_TELEMETRY_CONTROL))
+
+//Create buffers to hold aes-encrypted data
+uint8_t state_aes_buffer[state_packet_buffer_size];
+uint8_t sensor_aes_buffer[sensor_packet_buffer_size];
+uint8_t control_aes_buffer[control_packet_buffer_size];
 
 // create the XBee object
 XBee xbee = XBee();
 
-Tx16Request txStateEncrypted = Tx16Request(0x0000, state_aes_buffer, sizeof(state_aes_buffer));
-Tx16Request txSensorEncrypted = Tx16Request(0x0000, sensor_aes_buffer, sizeof(sensor_aes_buffer)); 
+Tx16Request txStateEncrypted = Tx16Request(0x0000, state_aes_buffer, state_packet_buffer_size);
+Tx16Request txSensorEncrypted = Tx16Request(0x0000, sensor_aes_buffer, sensor_packet_buffer_size);
+Tx16Request txControlEncrypted = Tx16Request(0x0000, control_aes_buffer, control_packet_buffer_size); 
 TxStatusResponse txStatus = TxStatusResponse();
 
 void setup() {
@@ -109,11 +144,11 @@ void setup() {
 
 	//Setup initial values
 	telem_state.timeSinceStartup = millis();
-	telem_state.pyroFire = 0x12;
+	telem_state.pyroFire = 0b00000011;
 
 	//DEMO STUFF
-	/*
-	Serial.println("AES-128 KEY:");
+	
+	/*Serial.println("AES-128 KEY:");
 	for (int i=0; i<KEYLENGTH(KEYBITS); i++) {
 		Serial.print("0x");
 		Serial.print(aes_key[i], HEX);
@@ -121,11 +156,12 @@ void setup() {
 	}
 	Serial.println("\n");
 
-	uint8_t state_aes_buffer[getAESBufferSize(sizeof(S_TELEMETRY_STATE))];
-	encryptAESBuffer(state_aes_buffer, &telem_state, sizeof(S_TELEMETRY_STATE));
+	uint8_t state_aes_buffer[getPacketBufferSize(sizeof(S_TELEMETRY_STATE))];
+	encryptPacket(TELEM_PACKET_TYPE_STATE, state_aes_buffer, &telem_state, sizeof(S_TELEMETRY_STATE));
 
 	S_TELEMETRY_STATE out;
-	decryptAESBuffer(&out, state_aes_buffer, sizeof(S_TELEMETRY_STATE));
+	TELEM_PACKET_TYPE type;
+	decryptPacket(&type, &out, state_aes_buffer, sizeof(S_TELEMETRY_STATE));
 
 	Serial.println("TSS, PF1");
 	Serial.println(telem_state.timeSinceStartup);
@@ -133,10 +169,115 @@ void setup() {
 	Serial.println("TSS, PF2");
 	Serial.println(out.timeSinceStartup);
 	Serial.println(out.pyroFire);
+	Serial.print("Expected vs parsed packet type: 0x"); Serial.print(TELEM_PACKET_TYPE_STATE, HEX); Serial.print(" | 0x"); Serial.println(type, HEX);
 	
+	Serial.println("\nOriginal telem_state in plaintext");
 	printBuffer((uint8_t*)&telem_state, sizeof(S_TELEMETRY_STATE));
+	Serial.println("Decrypted buffer");
 	printBuffer((uint8_t*)&out, sizeof(S_TELEMETRY_STATE));
-	*/
+	
+	while(true){}*/
+}
+
+unsigned long lastControl = 0;
+unsigned long lastSend = 0;
+int targetPPS = 50;
+float dtPacket = 1.0/targetPPS;
+int packetCount = 0;
+int fails = 0;
+int successes = 0;
+unsigned long lastPrint = 0;
+
+void loop() {
+	if ((millis()-lastSend)/1000.0 > dtPacket) {
+		unsigned long start = micros();
+		encryptPacket(TELEM_PACKET_TYPE_STATE, state_aes_buffer, &telem_state, sizeof(S_TELEMETRY_STATE));
+		unsigned long enc = micros();
+		xbee.send(txStateEncrypted);
+		unsigned long send = micros();
+
+		// Serial.print("AESEncryptTime: ");
+		// Serial.print((enc-start)/1000.0f, 3);
+		// Serial.print("ms, XBeeSendTime: ");
+		// Serial.print((send-enc)/1000.0f, 3);
+		// Serial.println("ms");
+		// Serial.print("FULLS_STATE: ");
+		// Serial.print((send-start)/1000.0f, 3);
+		// Serial.println("ms");
+
+		start = micros();
+		encryptPacket(TELEM_PACKET_TYPE_SENSOR, sensor_aes_buffer, &telem_sensor, sizeof(S_TELEMETRY_SENSOR));
+		enc = micros();
+		xbee.send(txSensorEncrypted);
+		send = micros();
+
+		// Serial.print("AESEncryptTime: ");
+		// Serial.print((enc-start)/1000.0f, 3);
+		// Serial.print("ms, XBeeSendTime: ");
+		// Serial.print((send-enc)/1000.0f, 3);
+		// Serial.println("ms");
+		// Serial.print("FULLS_SENSOR: ");
+		// Serial.print((send-start)/1000.0f, 3);
+		// Serial.println("ms");
+
+		if (millis() - lastControl > 1000) {
+			telem_control.commandID++;
+			telem_control.data1 = random(0, 255);
+			encryptPacket(TELEM_PACKET_TYPE_CONTROL, control_aes_buffer, &telem_control, sizeof(S_TELEMETRY_CONTROL));
+			xbee.send(txControlEncrypted);
+			lastControl = millis();
+		}
+
+		lastSend = millis();
+		packetCount++;
+	}
+
+	if (millis()-lastPrint > 1000) {
+
+		Serial.print("PacketRate: targ="); Serial.print(targetPPS); Serial.print(" | actual="); Serial.println(packetCount);
+		Serial.print("PacketOK: fail%="); Serial.print(fails/float(fails+successes)); Serial.print(" | success%="); Serial.println(successes/float(fails+successes));
+		packetCount = 0;
+		fails = 0;
+		successes = 0;
+		lastPrint = millis();
+	}
+
+	telem_state.timeSinceStartup = millis();
+	telem_sensor.GNSSLat = millis()+100;
+
+	xbee.readPacket();
+	if (xbee.getResponse().isAvailable()) {
+		if (xbee.getResponse().getApiId() == TX_STATUS_RESPONSE) {
+			xbee.getResponse().getTxStatusResponse(txStatus);
+
+			// get the delivery status, the fifth byte
+			if (txStatus.getStatus() == SUCCESS) {
+				// success.  time to celebrate
+				//Serial.println("Send ok; receiver ok");
+				successes++;
+			} else {
+				// the remote XBee did not receive our packet. is it powered on?
+				//Serial.println("Send ok; no receiver?");
+				fails++;
+			}
+		} else if (xbee.getResponse().isError()) {
+			Serial.println("Send ok; recv corrupt packet");
+			Serial.print("Error code: ");
+			Serial.println(xbee.getResponse().getErrorCode(), HEX); 
+		} else {
+			Serial.println("Send fail; radio ok?");
+			Serial.print("Weird API ID in response: ");
+			Serial.println(xbee.getResponse().getApiId(), HEX);
+		}
+	}
+}
+
+
+void encryptPacket(TELEM_PACKET_TYPE type, uint8_t *aes_buffer, void *unpaddedData, const int data_size) {
+	encryptAESBuffer(aes_buffer, unpaddedData, data_size);
+
+	memmove(aes_buffer+1, aes_buffer, getAESBufferSize(data_size)); //shift buffer over by 1 to make room for packet type as first byte
+	memset(aes_buffer, (uint8_t)type, 1); //copy packet type to first byte
 }
 
 void encryptAESBuffer(uint8_t *aes_buffer, void *unpaddedData, const int data_size) {
@@ -144,7 +285,7 @@ void encryptAESBuffer(uint8_t *aes_buffer, void *unpaddedData, const int data_si
 	int nroundsEnc = aesSetupEncrypt(rk, aes_key, KEYBITS);
 
 	//Find closest buffer size to packet sizes that are divisible by 16
-	const uint8_t aes_buffer_size = data_size - (data_size % 16) + 16;
+	const uint8_t aes_buffer_size = getAESBufferSize(data_size);
 
 	//Reset aes_buffer
 	memset(aes_buffer, 0, aes_buffer_size);
@@ -160,6 +301,19 @@ void encryptAESBuffer(uint8_t *aes_buffer, void *unpaddedData, const int data_si
 		aesEncrypt(rk, nroundsEnc, toEncrypt, encrypted); //Do the encryption
 		memcpy(aes_buffer+(i*16), encrypted, 16); //copy data back into buffer
 	}
+}
+
+//Decrypt to seperate packet type variable
+void decryptPacket(TELEM_PACKET_TYPE *type, void *out, uint8_t *aes_buffer, const int data_size) {
+	memset(type, aes_buffer[0], 1); //copy packet type into enum
+	memmove(aes_buffer, aes_buffer+1, getAESBufferSize(data_size)); //shift memory over correct amount
+	decryptAESBuffer(out, aes_buffer, data_size);
+}
+
+//Decrypt if you already know the packet type
+void decryptPacket(void *out, uint8_t *aes_buffer, const int data_size) {
+	memmove(aes_buffer, aes_buffer+1, getAESBufferSize(data_size)); //shift memory over correct amount
+	decryptAESBuffer(out, aes_buffer, data_size);
 }
 
 void decryptAESBuffer(void *out, uint8_t *aes_buffer, const int data_size) {
@@ -187,68 +341,14 @@ void decryptAESBuffer(void *out, uint8_t *aes_buffer, const int data_size) {
 }
 
 void printBuffer(uint8_t *buffer, const int buffer_size) {
-	Serial.println("BUFFER ------");
+	Serial.print("BUFFER SIZE=");
+	Serial.print(buffer_size);
+	Serial.println(" ------");
 	for (int i=0; i<buffer_size; i++) {
 		Serial.print("0x");
 		Serial.print(buffer[i], HEX);
-		Serial.print(" ");
+		Serial.print("\t");
+		if ((i+1)%6 == 0 && i != 0) Serial.println();
 	}
 	Serial.println("\n----------\n");
-}
-
-void loop() {
-	unsigned long start = micros();
-	encryptAESBuffer(state_aes_buffer, &telem_state, sizeof(S_TELEMETRY_STATE));
-	unsigned long enc = micros();
-	xbee.send(txStateEncrypted);
-	unsigned long send = micros();
-
-	Serial.print("AESEncryptTime: ");
-	Serial.print((enc-start)/1000.0f, 3);
-	Serial.print("ms, XBeeSendTime: ");
-	Serial.print((send-enc)/1000.0f, 3);
-	Serial.println("ms");
-	Serial.print("FULLS_STATE: ");
-	Serial.print((send-start)/1000.0f, 3);
-	Serial.println("ms");
-
-	start = micros();
-	encryptAESBuffer(sensor_aes_buffer, &telem_sensor, sizeof(S_TELEMETRY_SENSOR));
-	enc = micros();
-	xbee.send(txSensorEncrypted);
-	send = micros();
-
-	Serial.print("AESEncryptTime: ");
-	Serial.print((enc-start)/1000.0f, 3);
-	Serial.print("ms, XBeeSendTime: ");
-	Serial.print((send-enc)/1000.0f, 3);
-	Serial.println("ms");
-	Serial.print("FULLS_SENSOR: ");
-	Serial.print((send-start)/1000.0f, 3);
-	Serial.println("ms");
-
-	telem_state.timeSinceStartup = millis();
-	telem_sensor.GNSSLat = millis()+100;
-
-	xbee.readPacket();
-	if (xbee.getResponse().isAvailable()) {
-		if (xbee.getResponse().getApiId() == TX_STATUS_RESPONSE) {
-			xbee.getResponse().getTxStatusResponse(txStatus);
-
-			// get the delivery status, the fifth byte
-			if (txStatus.getStatus() == SUCCESS) {
-				// success.  time to celebrate
-				Serial.print("Send ok; receiver ok");
-			} else {
-				// the remote XBee did not receive our packet. is it powered on?
-				Serial.println("Send ok; no receiver?");
-			}
-		} else if (xbee.getResponse().isError()) {
-			Serial.println("Send ok; recv corrupt packet");    
-		} else {
-			Serial.println("Send fail; radio ok?");
-		}
-	}
-
-	delay(50);
 }

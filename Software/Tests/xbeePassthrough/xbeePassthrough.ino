@@ -11,8 +11,8 @@
  * FIRMWARE: XB3-24, 802.15.4, Rev 200C
  * Baud rate: 115200
  * AP: Mode 2
- * A MY+DH+DL: 0x0 0x0 0x1
- * B MY+DH+DL: 0x1 0x0 0x0
+ * A MY+DH+DL: 0x0 0x0 0x0
+ * B MY+DH+DL: 0x0 0x0 0x0
  */
 void setup() {
   Serial.begin(115200);
