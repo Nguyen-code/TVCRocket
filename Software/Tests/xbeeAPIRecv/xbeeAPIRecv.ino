@@ -164,22 +164,6 @@ void loop() {
 			Serial.print(" RSSI: "); Serial.println(rssi);
 
 			Serial.print("Times: STATE="); Serial.print(telem_state.timeSinceStartup); Serial.print(", SENSOR(+100ms)="); Serial.println(telem_sensor.GNSSLat);
-
-			// Serial.print("PL");
-			// Serial.println(packetLength);
-			// switch (packetLength) {
-			// 	default:
-			// 		Serial.println("Got packet of unknown size");
-			// 		break;
-			// 	case sizeof(S_TELEMETRY_STATE):
-			// 		Serial.println("Got state packet");
-			// 		S_TELEMETRY_STATE recv = (S_TELEMETRY_STATE &);
-			// 		telem_state.timeSinceStartup = recv.timeSinceStartup;
-			// 		break;
-			// 	case sizeof(S_TELEMETRY_SENSOR):
-			// 		Serial.println("Got sensor packet");
-			// 		break;
-			// }
 		}
 
 		if (xbee.getResponse().isError()) {
