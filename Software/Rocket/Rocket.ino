@@ -26,6 +26,9 @@ fix odd bug with lastRadioRecievedTimer and state changed based on telconn state
 Thrust curve interpolation
 https://github.com/luisllamasbinaburo/Arduino-Interpolation
 
+JOE FULL TELEMETRY
+https://docs.google.com/spreadsheets/d/1g16lZlNKqRVAd4mePxDKsWFw7Lo1jOPMTm628585Fh4/edit#gid=2054543638
+
 
 
 self test where rocket checks the following:
