@@ -29,6 +29,13 @@ https://github.com/luisllamasbinaburo/Arduino-Interpolation
 JOE FULL TELEMETRY
 https://docs.google.com/spreadsheets/d/1g16lZlNKqRVAd4mePxDKsWFw7Lo1jOPMTm628585Fh4/edit#gid=2054543638
 
+things to check before go to ready state (from startup):
+- good GPS lock
+- low PDOP
+- real lat/lon data (constrained)
+- battery
+- 5-6 other things in gps alone
+
 
 
 self test where rocket checks the following:
@@ -116,6 +123,9 @@ landing burn commit: can light landing motor outside of abort limits as long as 
 
 if(micros() < lastMicros) weRolledOver();
 Micros rollover count
+
+https://github.com/n0m1/Comp6DOF_n0m1
+Compass tilt calibration
 
 */
 

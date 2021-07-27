@@ -37,6 +37,7 @@ and
 https://github.com/TKJElectronics/KalmanFilter/blob/master/examples/MPU6050/MPU6050.ino
 https://github.com/FlyTheThings/uNavINS <---- THIS IS PERFECT FOR APPLICATION
 https://github.com/ydsf16/imu_gps_localization/blob/master/imu_gps_localizer/src/imu_processor.cpp <---- ALSO THIS
+ANOTHER ONE THAT JOE USED https://github.com/simondlevy/TinyEKF
 
 more general sim ref stuff
 https://github.com/Zentrik/TVC
